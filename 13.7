@@ -1,0 +1,103 @@
+The `System.IO.IOException` occurs when you're trying to move or rename a file to a destination path that already has a file with the same name. To handle this, you can check if the destination file already exists before moving the file. If it exists, you can either delete the existing file or generate a unique name for the new file.
+
+### Solution: Check for Existing File and Delete or Rename
+
+Here are a few ways to prevent this exception:
+
+#### Option 1: Overwrite the Existing File
+If you want to overwrite the existing file, you can delete the destination file first:
+
+```csharp
+if (File.Exists(newFileName))
+{
+    File.Delete(newFileName); // Delete the existing file if it exists
+}
+
+File.Move(newFilePath, newFileName); // Now move the file
+```
+
+#### Option 2: Generate a Unique File Name
+If you don't want to overwrite the existing file, you can generate a unique file name by appending a counter or timestamp:
+
+```csharp
+int counter = 1;
+string uniqueFileName = newFileName;
+
+while (File.Exists(uniqueFileName))
+{
+    uniqueFileName = Path.Combine(outputFolder, $"Invoice_{invoiceNo}_Page_{i}_{counter}.pdf");
+    counter++;
+}
+
+File.Move(newFilePath, uniqueFileName); // Move the file with a unique name
+```
+
+### Implementation in the Code
+
+Update the renaming logic in your `ProcessFile` method like this:
+
+```csharp
+private void ProcessFile(string filePath, string outputFolder)
+{
+    try
+    {
+        // Open the source PDF file
+        using (PdfReader reader = new PdfReader(filePath))
+        {
+            using (PdfDocument pdfDoc = new PdfDocument(reader))
+            {
+                // Iterate through each page
+                for (int i = 1; i <= pdfDoc.GetNumberOfPages(); i++)
+                {
+                    // Create a new document for each page
+                    string newFilePath = Path.Combine(outputFolder, $"tempPage_{i}.pdf");
+                    using (PdfWriter writer = new PdfWriter(newFilePath))
+                    {
+                        using (PdfDocument singlePagePdf = new PdfDocument(writer))
+                        {
+                            // Copy the page to the new document
+                            pdfDoc.CopyPagesTo(i, i, singlePagePdf);
+                        }
+                    }
+
+                    // Extract the invoice number and rename the file
+                    string invoiceNo = ExtractInvoiceNumber(newFilePath);
+                    if (!string.IsNullOrEmpty(invoiceNo))
+                    {
+                        string newFileName = Path.Combine(outputFolder, $"Invoice_{invoiceNo}_Page_{i}.pdf");
+
+                        // Option 1: Overwrite if exists
+                        if (File.Exists(newFileName))
+                        {
+                            File.Delete(newFileName); // Overwrite existing file
+                        }
+
+                        // Option 2: Generate a unique file name if the file already exists
+                        int counter = 1;
+                        string uniqueFileName = newFileName;
+                        while (File.Exists(uniqueFileName))
+                        {
+                            uniqueFileName = Path.Combine(outputFolder, $"Invoice_{invoiceNo}_Page_{i}_{counter}.pdf");
+                            counter++;
+                        }
+
+                        // Move the file
+                        File.Move(newFilePath, uniqueFileName); 
+                        Console.WriteLine($"Renamed to: {uniqueFileName}");
+                    }
+                }
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error processing file {filePath}: {ex.Message}");
+    }
+}
+```
+
+### Key Points:
+1. **Overwrite if Exists (Option 1)**: If you choose to overwrite the file, the existing file will be deleted before renaming.
+2. **Generate a Unique Name (Option 2)**: If you prefer to keep both files, the new file will be renamed with a counter (e.g., `Invoice_123_Page_1_1.pdf`, `Invoice_123_Page_1_2.pdf`).
+
+Choose the option that fits your use case. Let me know if this helps!
