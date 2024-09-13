@@ -1,0 +1,18 @@
+getting exception in this line -
+PdfDocument singlePagePdf = new PdfDocument(new PdfWriter(Path.Combine(outputFolder, $"tempPage_{i}.pdf")));
+
+Error details -
+iText.Kernel.Exceptions.PdfException
+  HResult=0x80131500
+  Message=Unknown PdfException.
+  Source=itext.kernel
+  StackTrace:
+   at iText.Kernel.Pdf.SmartModePdfObjectsSerializer..ctor()
+   at iText.Kernel.Pdf.PdfWriter..ctor(Stream os, WriterProperties properties)
+   at FileSplitterApp.FileProcessor.ProcessFile(String filePath, String outputFolder) in D:\Projects\GreystarPDFSplit\GreystarPDFSplit\FileProcessor.cs:line 57
+
+  This exception was originally thrown at this call stack:
+    [External Code]
+
+Inner Exception 1:
+NotSupportedException: Either com.itextpdf:bouncy-castle-adapter or com.itextpdf:bouncy-castle-fips-adapter dependency must be added in order to use BouncyCastleFactoryCreator
