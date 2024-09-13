@@ -1,0 +1,82 @@
+To adjust the naming convention so that the first file for an invoice number has just the invoice number (e.g., `Invoice_45765.pdf`), and subsequent files for the same invoice number are named with `_1`, `_2`, etc., you can modify the logic to skip appending `_1` for the first file.
+
+Here's how to implement this:
+
+### Updated Code for Invoice Naming
+
+```csharp
+private void ProcessFile(string filePath, string outputFolder)
+{
+    try
+    {
+        // Open the source PDF file
+        using (PdfReader reader = new PdfReader(filePath))
+        {
+            using (PdfDocument pdfDoc = new PdfDocument(reader))
+            {
+                // Iterate through each page
+                for (int i = 1; i <= pdfDoc.GetNumberOfPages(); i++)
+                {
+                    // Create a new document for each page
+                    string tempFilePath = Path.Combine(outputFolder, $"tempPage_{i}.pdf");
+                    using (PdfWriter writer = new PdfWriter(tempFilePath))
+                    {
+                        using (PdfDocument singlePagePdf = new PdfDocument(writer))
+                        {
+                            // Copy the page to the new document
+                            pdfDoc.CopyPagesTo(i, i, singlePagePdf);
+                        }
+                    }
+
+                    // Extract the invoice number
+                    string invoiceNo = ExtractInvoiceNumber(tempFilePath);
+                    if (!string.IsNullOrEmpty(invoiceNo))
+                    {
+                        // Set base file name with Invoice Number
+                        string baseFileName = Path.Combine(outputFolder, $"Invoice_{invoiceNo}.pdf");
+
+                        // Check if the file without the counter exists
+                        string uniqueFileName = baseFileName;
+
+                        // If the base file (without _1) already exists, start adding numbers
+                        int counter = 1;
+                        if (File.Exists(uniqueFileName))
+                        {
+                            // Append _1, _2, etc., for subsequent files
+                            uniqueFileName = Path.Combine(outputFolder, $"Invoice_{invoiceNo}_{counter}.pdf");
+
+                            // Increment the counter until a unique file name is found
+                            while (File.Exists(uniqueFileName))
+                            {
+                                counter++;
+                                uniqueFileName = Path.Combine(outputFolder, $"Invoice_{invoiceNo}_{counter}.pdf");
+                            }
+                        }
+
+                        // Move the temp file to the unique file name
+                        File.Move(tempFilePath, uniqueFileName);
+                        Console.WriteLine($"File saved as: {uniqueFileName}");
+                    }
+                }
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error processing file {filePath}: {ex.Message}");
+    }
+}
+```
+
+### Key Changes:
+1. **First File Naming**: The first file for each invoice number is saved as `Invoice_<invoiceNo>.pdf`.
+2. **Subsequent Files**: If the file `Invoice_<invoiceNo>.pdf` already exists, the counter starts from `_1` (i.e., `Invoice_<invoiceNo>_1.pdf`, `Invoice_<invoiceNo>_2.pdf`, etc.).
+3. **Unique File Name Check**: The code checks if `Invoice_<invoiceNo>.pdf` exists first and then increments the counter to ensure each new file for the same invoice number gets a unique name.
+
+### Example:
+For `Invoice No: 45765`, the following files would be generated:
+- First file: `Invoice_45765.pdf`
+- Second file: `Invoice_45765_1.pdf`
+- Third file: `Invoice_45765_2.pdf`
+
+This approach ensures the first file doesn't have a suffix, and subsequent files are correctly numbered. Let me know if this meets your requirements!
