@@ -1,0 +1,132 @@
+To help you get started with your .NET Core 6.0 console application, here’s an outline of how you can approach the task. You’ll need to install a PDF processing library (like iTextSharp or PDFSharp) to handle splitting files if the files are PDFs. Here's a basic structure:
+
+1. **Create Console Application**:
+   - Open Visual Studio and create a new .NET Core 6.0 Console App.
+
+2. **Install necessary packages**:
+   - If dealing with PDFs, you can install iText7:
+     ```bash
+     dotnet add package itext7
+     ```
+
+3. **Basic Code Structure**:
+   Here's the complete code to read files from the "Inputfolder," split pages, and rename based on the "Invoice No" text:
+
+```csharp
+using System;
+using System.IO;
+using System.Linq;
+using iText.Kernel.Pdf;
+using iText.Kernel.Utils;
+using System.Text.RegularExpressions;
+
+namespace FileSplitterApp
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            string downloadsFolder = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + @"\Downloads";
+            string inputFolder = Path.Combine(downloadsFolder, "Inputfolder");
+            string outputFolder = Path.Combine(downloadsFolder, "Outputfolder");
+
+            // Ensure folders exist
+            EnsureFolderExists(inputFolder);
+            EnsureFolderExists(outputFolder);
+
+            // Get all files from the input folder
+            var files = Directory.GetFiles(inputFolder);
+            foreach (var file in files)
+            {
+                Console.WriteLine($"Processing file: {file}");
+                ProcessFile(file, outputFolder);
+            }
+
+            Console.WriteLine("Processing completed.");
+        }
+
+        static void EnsureFolderExists(string folderPath)
+        {
+            if (!Directory.Exists(folderPath))
+            {
+                Directory.CreateDirectory(folderPath);
+                Console.WriteLine($"Created folder: {folderPath}");
+            }
+            else
+            {
+                Console.WriteLine($"Folder already exists: {folderPath}");
+            }
+        }
+
+        static void ProcessFile(string filePath, string outputFolder)
+        {
+            try
+            {
+                using (PdfReader reader = new PdfReader(filePath))
+                {
+                    using (PdfDocument pdfDoc = new PdfDocument(reader))
+                    {
+                        // Split each page
+                        for (int i = 1; i <= pdfDoc.GetNumberOfPages(); i++)
+                        {
+                            PdfDocument singlePagePdf = new PdfDocument(new PdfWriter(Path.Combine(outputFolder, $"tempPage_{i}.pdf")));
+                            PdfPage page = pdfDoc.GetPage(i);
+                            page.CopyTo(singlePagePdf);
+                            singlePagePdf.Close();
+
+                            // Extract invoice number
+                            string invoiceNo = ExtractInvoiceNumber(Path.Combine(outputFolder, $"tempPage_{i}.pdf"));
+                            if (!string.IsNullOrEmpty(invoiceNo))
+                            {
+                                string newFileName = Path.Combine(outputFolder, $"Invoice_{invoiceNo}_Page_{i}.pdf");
+                                File.Move(Path.Combine(outputFolder, $"tempPage_{i}.pdf"), newFileName);
+                                Console.WriteLine($"Renamed to: {newFileName}");
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error processing file {filePath}: {ex.Message}");
+            }
+        }
+
+        static string ExtractInvoiceNumber(string filePath)
+        {
+            // Simulating the extraction of invoice number
+            // In real case, you'll need to extract text from the PDF page
+            string pageText = ExtractTextFromPdf(filePath);
+
+            // Regex pattern to find "Invoice No: <number>"
+            Regex regex = new Regex(@"Invoice No:\s*(\d+)");
+            Match match = regex.Match(pageText);
+            if (match.Success)
+            {
+                return match.Groups[1].Value; // Extracted numeric value
+            }
+
+            return null;
+        }
+
+        static string ExtractTextFromPdf(string filePath)
+        {
+            // Simulate PDF text extraction (in a real scenario, use iText or other libraries)
+            // Placeholder for extracted text
+            return "Invoice No: 12345\nSome other content on the page.";
+        }
+    }
+}
+```
+
+### Breakdown:
+1. **Folders Setup**: The app checks if the "Inputfolder" and "Outputfolder" exist. If not, it creates them.
+2. **File Processing**: The program iterates over each file in the "Inputfolder," splits the PDF into individual pages, and saves each page as a new PDF.
+3. **Invoice No. Extraction**: The `ExtractInvoiceNumber` function simulates extracting the "Invoice No" from the PDF. You can replace the extraction logic based on the structure of your actual files.
+4. **File Renaming**: Once the invoice number is extracted, the page is renamed accordingly.
+
+### Additional Notes:
+- **PDF Text Extraction**: This example includes a placeholder for PDF text extraction. You’ll need to replace the `ExtractTextFromPdf` method with real logic to extract text from each page using a library like iText or PDFBox.
+- **File Formats**: This example assumes the files are PDFs. If you're working with other formats, you’ll need to adapt the splitting and text extraction methods accordingly.
+
+Let me know if you need further assistance with specific parts of the task!
