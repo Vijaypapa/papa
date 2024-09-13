@@ -1,0 +1,98 @@
+To split a PDF file into individual pages and create new PDFs for each page, you need to ensure that each page is correctly copied from the input PDF and saved as a separate PDF. The issue you're facing with empty PDFs could be due to how the pages are being copied or saved.
+
+Here’s an updated approach that ensures each page is extracted and saved properly using `iText7`:
+
+### Updated Code for Splitting PDF Pages
+
+Replace your `ProcessFile` method with this updated version:
+
+```csharp
+private void ProcessFile(string filePath, string outputFolder)
+{
+    try
+    {
+        // Open the source PDF file
+        using (PdfReader reader = new PdfReader(filePath))
+        {
+            using (PdfDocument pdfDoc = new PdfDocument(reader))
+            {
+                // Iterate through each page
+                for (int i = 1; i <= pdfDoc.GetNumberOfPages(); i++)
+                {
+                    // Create a new document for each page
+                    string newFilePath = Path.Combine(outputFolder, $"tempPage_{i}.pdf");
+                    using (PdfWriter writer = new PdfWriter(newFilePath))
+                    {
+                        using (PdfDocument singlePagePdf = new PdfDocument(writer))
+                        {
+                            // Copy the page to the new document
+                            pdfDoc.CopyPagesTo(i, i, singlePagePdf);
+                        }
+                    }
+
+                    // Extract the invoice number and rename the file
+                    string invoiceNo = ExtractInvoiceNumber(newFilePath);
+                    if (!string.IsNullOrEmpty(invoiceNo))
+                    {
+                        string newFileName = Path.Combine(outputFolder, $"Invoice_{invoiceNo}_Page_{i}.pdf");
+                        File.Move(newFilePath, newFileName);
+                        Console.WriteLine($"Renamed to: {newFileName}");
+                    }
+                }
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error processing file {filePath}: {ex.Message}");
+    }
+}
+```
+
+### Key Changes:
+1. **`CopyPagesTo` Method**: 
+   - This method copies a specific page (in this case, each page individually) from the source PDF to a new PDF.
+   
+2. **Correct File Saving**: 
+   - A new `PdfWriter` and `PdfDocument` is created for each page, ensuring that the page is written correctly to the new PDF.
+   
+3. **File Renaming**: 
+   - Once a new file is created for each page, the `ExtractInvoiceNumber` function runs to rename the file based on the extracted invoice number.
+
+### What Does This Code Do?
+- **Iterates over each page** of the PDF using `for (int i = 1; i <= pdfDoc.GetNumberOfPages(); i++)`.
+- **Creates a new PDF document** for each page using `PdfWriter` and `PdfDocument`.
+- **Copies the individual page** from the source PDF using `pdfDoc.CopyPagesTo(i, i, singlePagePdf)`.
+- **Saves the file** with a temporary name (e.g., `tempPage_1.pdf`).
+- **Renames the file** after extracting the "Invoice No." value from the page content.
+
+### Potential Additions:
+- **Extracting Text**: You can use the `PdfTextExtractor` class from iText to extract text for each page if you need to process the content and extract the "Invoice No." Here's an example of how to do that:
+
+```csharp
+private string ExtractInvoiceNumber(string filePath)
+{
+    using (PdfReader reader = new PdfReader(filePath))
+    {
+        using (PdfDocument pdfDoc = new PdfDocument(reader))
+        {
+            string text = PdfTextExtractor.GetTextFromPage(pdfDoc.GetFirstPage());
+            
+            // Regex pattern to find "Invoice No: <number>"
+            Regex regex = new Regex(@"Invoice No:\s*(\d+)");
+            Match match = regex.Match(text);
+            if (match.Success)
+            {
+                return match.Groups[1].Value; // Extracted numeric value
+            }
+        }
+    }
+    return null;
+}
+```
+
+- **Better File Naming**: You can adjust the file renaming logic if you have more specific requirements for naming the output files.
+
+With this updated approach, the PDF pages should be correctly split, saved, and renamed based on the "Invoice No." extracted from each page.
+
+Let me know if this resolves your issue!
