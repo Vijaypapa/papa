@@ -1,0 +1,32 @@
+The issue seems to be related to how you're calculating the cumulative Outstanding based on the `SIStatus`. Your requirement states that:
+
+1. If `SIStatus = 3`, the `Outstanding` should be the same as the `TotalPOAmount`.
+2. If `SIStatus = 4`, the `Outstanding` should be calculated as the cumulative subtraction of `InvoiceAmount` from the previous `Outstanding`.
+
+To achieve this in SQL Server, you can use the `SUM()` window function with `PARTITION BY` and `ORDER BY` clauses to implement the cumulative subtraction logic. Here's an updated version of the `Outstanding` calculation in your query:
+
+### Updated `Outstanding` Calculation
+```sql
+case 
+    when SI.StatusId = 3 then podetailgroup.TotalPO  -- If SIStatus = 3, Outstanding = TotalPOAmount
+    when SI.StatusId = 4 then 
+        podetailgroup.TotalPO - SUM(ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0)) 
+        OVER (PARTITION BY podetailgroup.PurchaseOrderId, podetailgroup.NominalCodeId 
+              ORDER BY SI.InvoiceCreateDate ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+    else podetailgroup.TotalPO  -- Default case for other statuses
+end AS Outstanding
+```
+
+### Explanation:
+- **SIStatus = 3**: When the `SIStatus` is `3`, the `Outstanding` is directly set to `TotalPOAmount`.
+- **SIStatus = 4**: The `Outstanding` is calculated by subtracting the cumulative sum of the `InvoiceAmount` from the `TotalPOAmount`. The window function `SUM() OVER` allows for cumulative aggregation, and the clause `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` ensures the sum is cumulative up to the current row.
+- **Other statuses**: You can add logic to handle other statuses if necessary or leave them as `TotalPOAmount`.
+
+### Updated Query Snippet
+Replace the previous `Outstanding` calculation in your query with the above code, and this should provide the correct cumulative Outstanding values.
+
+This approach ensures that:
+- For the same `PurchaseOrderNo` and `NominalCodeId`, the calculation is cumulative.
+- For different `PurchaseOrderNo`, the calculation is independent, as it's partitioned by `PurchaseOrderId` and `NominalCodeId`.
+
+Let me know if you need further adjustments!
