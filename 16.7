@@ -1,0 +1,28 @@
+CASE 
+    -- If Status is 3, set Outstanding to TotalPOAmount
+    WHEN SI.StatusId = 3 THEN podetailgroup.TotalPO  
+    
+    -- If Status is 4, perform cumulative subtraction of InvoiceAmount
+    WHEN SI.StatusId = 4 THEN 
+        CASE 
+            -- Ensure that outstanding does not go negative
+            WHEN podetailgroup.TotalPO - 
+                 SUM(ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0))
+                 OVER (
+                    PARTITION BY podetailgroup.PurchaseOrderId, podetailgroup.NominalCodeId 
+                    ORDER BY SI.InvoiceCreateDate, SI.SupplierInvoiceId 
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                 ) < 0 
+            THEN 0 -- If the outstanding would be negative, return 0
+            ELSE podetailgroup.TotalPO - 
+                 SUM(ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0))
+                 OVER (
+                    PARTITION BY podetailgroup.PurchaseOrderId, podetailgroup.NominalCodeId 
+                    ORDER BY SI.InvoiceCreateDate, SI.SupplierInvoiceId 
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                 )
+        END
+        
+    -- Default case if neither 3 nor 4
+    ELSE podetailgroup.TotalPO 
+END AS Outstanding
