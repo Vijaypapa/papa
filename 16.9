@@ -1,0 +1,33 @@
+CASE 
+    -- If Status is 3, set Outstanding to TotalPOAmount
+    WHEN SI.StatusId = 3 THEN podetailgroup.TotalPO  
+    
+    -- If Status is 4, calculate row-wise difference between TotalPOAmount and InvoiceAmount for each invoice
+    WHEN SI.StatusId = 4 THEN 
+        podetailgroup.TotalPO - 
+        (ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0))
+        
+    -- Default case if neither 3 nor 4
+    ELSE podetailgroup.TotalPO 
+END AS Outstanding
+
+
+
+
+
+
+
+CASE 
+    WHEN SI.StatusId = 3 THEN podetailgroup.TotalPO  
+    
+    WHEN SI.StatusId = 4 THEN 
+        podetailgroup.TotalPO - 
+        SUM(ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0))
+        OVER (
+            PARTITION BY podetailgroup.PurchaseOrderId, podetailgroup.NominalCodeId 
+            ORDER BY SI.InvoiceCreateDate, SI.SupplierInvoiceId
+            ROWS UNBOUNDED PRECEDING
+        )
+    
+    ELSE podetailgroup.TotalPO 
+END AS Outstanding
