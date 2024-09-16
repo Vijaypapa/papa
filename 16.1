@@ -1,0 +1,130 @@
+USE [StudentCastlePOSystem_Staging]
+GO
+
+/****** Object:  View [dbo].[View_PurchaseOrderDetailsReport_1609]    Script Date: 16-09-2024 13:07:49 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+--ALTER view [dbo].[View_PurchaseOrderDetailsReport] as 
+ALTER view [dbo].[View_PurchaseOrderDetailsReport_1609] as
+SELECT 
+    ISNULL(po.PurchaseOrderNo, '') AS PurchaseOrderNo,  
+    ISNULL(po.SiteName, '') AS SiteName,  
+    Stuff((  
+       SELECT ';' + Cast(mat.materialname AS VARCHAR(max))  
+       FROM materials mat  
+       WHERE mat.materialid IN (  
+         SELECT MaterialId  
+         FROM PurchaseOrdersDetails AS pod1  
+         WHERE pod1.PurchaseOrderId = podetailgroup.PurchaseOrderId  
+          AND pod1.NominalCodeId = podetailgroup.NominalCodeId  
+         )  
+       FOR XML path('')  
+    ), 1, 1, '') AS MaterialName,  
+    ISNULL(podetailgroup.NominalCode, '') AS NominalCode,  
+    ISNULL(podetailgroup.NominalCodeName, '') AS NominalCodeDesc,  
+    ISNULL(po.CreatorName, '') AS POCreator,  
+    dbo.GetPurchaseOrderAuthorizers(po.PurchaseOrderId) AS POAuthoriser,  
+    supplier.RefNo AS SupplierSageCode,  
+    ISNULL(po.SupplierName, '') AS SupplierName,  
+    ISNULL(po.SupplierAdd, '') AS SupplierAddress,  
+    ISNULL(po.PaymentTerm, '') AS PaymentTerm,  
+    po.CreatedDate AS PODate,  
+    podetailgroup.TotalPO AS TotalPOAmount,  
+    ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0) AS InvoiceAmount,
+
+   case when  SI.StatusId=3 Then  podetailgroup.TotalPO  else 
+    podetailgroup.TotalPO - SUM(ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0)) 
+        OVER (PARTITION BY podetailgroup.PurchaseOrderId, podetailgroup.NominalCodeId 
+              ORDER BY SI.InvoiceCreateDate) end AS Outstanding,
+
+    ISNULL(po.Delivery, 0) AS Delivery,  
+    ISNULL(po.Remarks, '') AS PORemarks,  
+    ISNULL(po.RejectRemarks, '') AS PORejectRemarks,  
+    ISNULL(ISNULL(podetailgroup.Quantity, 0) * ISNULL(podetailgroup.Rate, 0) * ISNULL(podetailgroup.TotalVat, 0) / 100, 0) AS POTotalVatAmount,  
+    ISNULL((podetailgroup.Quantity * podetailgroup.Rate), 0) AS PONetAmount,  
+    po.StatusId AS POStatus,  
+    SI.StatusId AS SIStatus,  
+    ISNULL(SI.SupplierInvoiceNo, '') AS AGINo,  
+    ISNULL(PurI.PurchaseInvoiceId, '') AS UniqueInvoiceNo,  
+    ISNULL(SI.BillNo, '') AS InvoiceNo,  
+    SI.BillDate AS InvoiceDate,  
+    SI.DueDate AS InvoiceDueDate,  
+    SI.InvoiceCreateDate AS SICreatedDate,  
+    (  
+      SELECT SUM(ISNULL(sd.SITotalAmount, 0) + ISNULL(sd.Delivery, 0)) AS Expr1  
+      FROM dbo.SupplierInvoices AS s WITH (NOLOCK)  
+      INNER JOIN dbo.SupplierInvoiceDetails AS sd WITH (NOLOCK) ON s.SupplierInvoiceId = sd.SupplierInvoiceId  
+      WHERE (s.PurchaseOrderId = po.PurchaseOrderId)  
+       AND (sd.NominalCodeId = podetailgroup.NominalCodeId)  
+       AND (  
+        s.StatusId NOT IN (5, 3)  
+        )  
+    ) AS TotalInvoiceAmount,  
+    ISNULL(SIDetail.VatAmount, 0) AS InvoiceVatAmount,  
+    ISNULL(SIDetail.VatPer, 0) AS InvoiceVatPercentage,  
+    ISNULL(SIDetail.FromDate, '') AS FromDate,  
+    ISNULL(SIDetail.ToDate, '') AS ToDate,  
+    ISNULL(SI.AuthoriserName, '') AS InvoiceAuthoriser,  
+    ISNULL(SI.Remarks, '') AS SIRemarks,  
+    ISNULL(SI.QueryRemarks, '') AS SIQueryRemarks,  
+    ISNULL(PaymentMode.PaymentMode, '') AS PaymentMode,  
+    ISNULL(SI.PaymentReferenceNo, '') AS PaymentRefNo,  
+    SI.PaymentReferenceDate AS PaymentRefDate,  
+    ISNULL(po.FinanceRemarks, '') AS FinanceRemarks,  
+    SI.AuthoriseDate AS SIAuthoriserDate,  
+    po.Authorisedate AS AuthoriserDate,  
+    ISNULL(po.POType, '') AS POType,  
+    po.Siteid,  
+    po.CreatedDate  
+
+FROM dbo.PurchaseOrders AS po WITH (NOLOCK)  
+INNER JOIN dbo.Suppliers AS supplier WITH (NOLOCK) ON supplier.SupplierId = po.SupplierId  
+LEFT OUTER JOIN dbo.SupplierInvoices AS SI WITH (NOLOCK) ON SI.PurchaseOrderId = po.PurchaseOrderId  
+INNER JOIN (  
+    SELECT podetail.PurchaseOrderId AS PurchaseOrderId,  
+           podetail.NominalCodeId AS NominalCodeId,  
+           ncode.NominalCode NominalCode,  
+           ncode.NominalCodeName NominalCodeName,  
+           SUM(podetail.Total + ISNULL(podetail.Delivery, 0)) AS TotalPO,  
+           SUM(podetail.Vat) AS TotalVat,  
+           SUM(podetail.Rate) AS Rate,  
+           SUM(podetail.Quantity) AS Quantity  
+    FROM PurchaseOrdersDetails podetail  
+    INNER JOIN NominalCodes ncode ON ncode.NominalCodeId = podetail.NominalCodeId  
+    GROUP BY podetail.PurchaseOrderId, podetail.NominalCodeId, ncode.NominalCode, ncode.NominalCodeName  
+) podetailgroup ON podetailgroup.PurchaseOrderId = po.PurchaseOrderId  
+LEFT OUTER JOIN dbo.SupplierInvoiceDetails AS SIDetail WITH (NOLOCK) ON podetailgroup.NominalCodeId = SIDetail.NominalCodeId  
+    AND SI.SupplierInvoiceId = SIDetail.SupplierInvoiceId  
+LEFT OUTER JOIN dbo.PaymentModes AS PaymentMode WITH (NOLOCK) ON PaymentMode.PaymentModeId = SI.PaymentModeId  
+LEFT OUTER JOIN dbo.PurchaseInvoices AS PurI WITH (NOLOCK) ON PurI.SupplierInvoiceId = SI.SupplierInvoiceId  
+    AND PurI.PurchaseInvoiceStatusId = 8  
+GO
+
+we need actual calculation of Outstanding on behalf of PurchaseOrderNo and SIStatus that written in below mention data -
+PurchaseOrderNo	NominalCode	TotalPOAmount	InvoiceAmount	Outstanding	SIStatus	AuthoriserDate	POType	Siteid
+A001/2023/2244	71030	8430	8430	8430	3	57:00.5	Budgeted OPEX	44
+A001/2023/2244	71030	8430	8430	0	4	57:00.5	Budgeted OPEX	44
+A016/2023/662	50250	3416.9	0	3416.9	4	20:55.4	Budgeted OPEX	59
+A016/2023/662	50250	3416.9	0	3416.9	4	20:55.4	Budgeted OPEX	59
+A016/2023/662	50250	3416.9	0	3416.9	4	20:55.4	Budgeted OPEX	59
+
+but we are getting wrong calculation of Outstanding on behalf of PurchaseOrderNo and SIStatus that written in below mention data -
+PurchaseOrderNo	NominalCode	TotalPOAmount	InvoiceAmount	Outstanding	SIStatus	UniqueInvoiceNo
+A001/2023/2244	71030	8430	8430	8430	3	6245
+A001/2023/2244	71030	8430	8430	-8430	4	6247
+A016/2023/662	50250	3416.9	0	3416.9	4	6003
+A016/2023/662	50250	3416.9	0	3416.9	4	6002
+A016/2023/662	50250	3416.9	0	3416.9	4	6001
+A016/2023/662	50250	3416.9	769.5	2647.4	4	6000
+
+so what is wrong here is that for same PurchaseOrderNo number if SIStatus is 3 then it will write Outstanding same as TotalPOAmount but 
+where SIStatus is 4 it will subtract Outstanding = Outstanding - InvoiceAmount. it is cumulative process.
+so for example Outstanding of row number 2 will Outstanding of row number 1 - InvoiceAmount of row number 2
+and Outstanding of row number 3 will Outstanding of row number 2 - InvoiceAmount of row number 3
+where PurchaseOrderNo is same and SIStatus is 4
+for different PurchaseOrderNo it will do seperate calculation for that perticular PurchaseOrderNo
