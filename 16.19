@@ -1,0 +1,88 @@
+WITH CTE AS (
+    SELECT   
+        ISNULL(po.PurchaseOrderNo, '') AS PurchaseOrderNo,    
+        ISNULL(podetailgroup.NominalCode, '') AS NominalCode,    
+        podetailgroup.TotalPO AS TotalPOAmount,    
+        ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0) AS InvoiceAmount,  
+        SI.StatusId AS SIStatus,    
+        SI.InvoiceCreateDate AS SICreatedDate,    
+        po.CreatedDate,
+        
+        -- Calculate the row number for ordering within each PurchaseOrderNo and NominalCode
+        ROW_NUMBER() OVER (PARTITION BY po.PurchaseOrderNo, podetailgroup.NominalCode ORDER BY SI.InvoiceCreateDate) AS RowNumber,
+
+        -- Get the TotalPOAmount for later calculations
+        podetailgroup.TotalPO AS BaseOutstanding
+    FROM dbo.PurchaseOrders AS po WITH (NOLOCK)    
+    INNER JOIN dbo.Suppliers AS supplier WITH (NOLOCK) ON supplier.SupplierId = po.SupplierId    
+    LEFT OUTER JOIN dbo.SupplierInvoices AS SI WITH (NOLOCK) ON SI.PurchaseOrderId = po.PurchaseOrderId    
+    INNER JOIN (    
+        SELECT podetail.PurchaseOrderId AS PurchaseOrderId,    
+               podetail.NominalCodeId AS NominalCodeId,    
+               ncode.NominalCode NominalCode,    
+               SUM(podetail.Total + ISNULL(podetail.Delivery, 0)) AS TotalPO    
+        FROM PurchaseOrdersDetails podetail    
+        INNER JOIN NominalCodes ncode ON ncode.NominalCodeId = podetail.NominalCodeId    
+        GROUP BY podetail.PurchaseOrderId, podetail.NominalCodeId, ncode.NominalCode    
+    ) podetailgroup ON podetailgroup.PurchaseOrderId = po.PurchaseOrderId    
+    LEFT OUTER JOIN dbo.SupplierInvoiceDetails AS SIDetail WITH (NOLOCK) 
+        ON podetailgroup.NominalCodeId = SIDetail.NominalCodeId    
+        AND SI.SupplierInvoiceId = SIDetail.SupplierInvoiceId    
+    WHERE po.PurchaseOrderNo IN ('A001/2023/2244', 'A016/2023/662')
+    AND NominalCode IN ('50250', '71030')
+)
+
+-- Calculating the Outstanding value based on cumulative InvoiceAmount
+SELECT 
+    CTE.PurchaseOrderNo,
+    CTE.NominalCode,
+    CTE.TotalPOAmount,
+    CTE.InvoiceAmount,
+
+    CASE 
+        -- If Status is 3, set Outstanding to TotalPOAmount
+        WHEN CTE.SIStatus = 3 THEN CTE.TotalPOAmount
+
+        -- If Status is 4, calculate row-wise cumulative difference
+        WHEN CTE.SIStatus = 4 THEN 
+            CTE.BaseOutstanding - 
+            SUM(CTE.InvoiceAmount) OVER (
+                PARTITION BY CTE.PurchaseOrderNo, CTE.NominalCode 
+                ORDER BY CTE.RowNumber 
+                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+            )
+        
+        -- Default case if neither 3 nor 4
+        ELSE CTE.TotalPOAmount 
+    END AS Outstanding,
+
+    CTE.SIStatus,    
+    CTE.SICreatedDate,    
+    CTE.CreatedDate
+FROM CTE
+ORDER BY CTE.PurchaseOrderNo, CTE.SIStatus, CTE.SICreatedDate;
+
+for Outstanding column =>
+row number 7 => 2647.40 - 2308.50 = 338.90
+row number 8 => 338.90 - 1540.44 = -1201.54
+these are correct calculation but
+but here i am getting -8430.00 which is incorrect
+row number 2 => 8430.00 - 8430.00 = 0 here we want to get 0 because as per cumulative calculation Outstanding of row 2 = Outstanding of row 1 - InvoiceAmount of row 2
+then why getting -8430.00
+
+we want negative values as per calculation which we are getting in row 8 thats correct but row 2 calculation for Outstanding column is incorrect.
+
+PurchaseOrderNo	NominalCode	TotalPOAmount	InvoiceAmount	Outstanding	SIStatus	SICreatedDate	CreatedDate
+A001/2023/2244	71030	8430.00	8430.00	8430.00	3	2023-11-28 16:49:43.473	2023-11-27 12:47:27.190
+A001/2023/2244	71030	8430.00	8430.00	-8430.00	4	2023-11-29 08:28:26.640	2023-11-27 12:47:27.190
+A016/2023/662	50250	3416.90	0.00	3416.90	4	2023-11-29 14:24:42.007	2023-07-26 16:50:46.320
+A016/2023/662	50250	3416.90	0.00	3416.90	4	2023-11-29 14:27:20.880	2023-07-26 16:50:46.320
+A016/2023/662	50250	3416.90	0.00	3416.90	4	2023-11-29 14:35:43.830	2023-07-26 16:50:46.320
+A016/2023/662	50250	3416.90	769.50	2647.40	4	2023-11-29 14:39:02.810	2023-07-26 16:50:46.320
+A016/2023/662	50250	3416.90	2308.50	338.90	4	2023-11-29 14:41:48.037	2023-07-26 16:50:46.320
+A016/2023/662	50250	3416.90	1540.44	-1201.54	4	2023-11-29 14:43:15.607	2023-07-26 16:50:46.320
+A016/2023/662	50250	3416.90	0.00	-1201.54	4	2023-11-29 15:35:37.837	2023-07-26 16:50:46.320
+A016/2023/662	50250	3416.90	0.00	-1201.54	4	2023-11-29 15:36:49.520	2023-07-26 16:50:46.320
+A016/2023/662	50250	3416.90	0.00	-1201.54	4	2023-11-29 15:38:18.987	2023-07-26 16:50:46.320
+
+
