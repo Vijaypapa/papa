@@ -1,0 +1,83 @@
+To apply the cumulative logic for the `Outstanding` column as you described, you need to modify the query to consider previous rows' `Outstanding` values and adjust them based on the current row's `InvoiceAmount`. We can achieve this by using a window function, such as `SUM() OVER()`, that operates on a partitioned and ordered set of rows to calculate the cumulative subtraction.
+
+Here's how you can modify the query:
+
+```sql
+WITH CTE AS (
+    SELECT   
+        ISNULL(po.PurchaseOrderNo, '') AS PurchaseOrderNo,    
+        ISNULL(podetailgroup.NominalCode, '') AS NominalCode,    
+        podetailgroup.TotalPO AS TotalPOAmount,    
+        ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0) AS InvoiceAmount,  
+        SI.StatusId AS SIStatus,    
+        SI.InvoiceCreateDate AS SICreatedDate,    
+        po.CreatedDate,
+        
+        -- Calculating the row number for each record within the PurchaseOrderNo and NominalCode partition
+        ROW_NUMBER() OVER (PARTITION BY po.PurchaseOrderNo, podetailgroup.NominalCode ORDER BY SI.InvoiceCreateDate) AS RowNumber,
+
+        -- Get the TotalPOAmount for later calculations
+        podetailgroup.TotalPO AS BaseOutstanding
+    FROM dbo.PurchaseOrders AS po WITH (NOLOCK)    
+    INNER JOIN dbo.Suppliers AS supplier WITH (NOLOCK) ON supplier.SupplierId = po.SupplierId    
+    LEFT OUTER JOIN dbo.SupplierInvoices AS SI WITH (NOLOCK) ON SI.PurchaseOrderId = po.PurchaseOrderId    
+    INNER JOIN (    
+        SELECT podetail.PurchaseOrderId AS PurchaseOrderId,    
+               podetail.NominalCodeId AS NominalCodeId,    
+               ncode.NominalCode NominalCode,    
+               SUM(podetail.Total + ISNULL(podetail.Delivery, 0)) AS TotalPO    
+        FROM PurchaseOrdersDetails podetail    
+        INNER JOIN NominalCodes ncode ON ncode.NominalCodeId = podetail.NominalCodeId    
+        GROUP BY podetail.PurchaseOrderId, podetail.NominalCodeId, ncode.NominalCode    
+    ) podetailgroup ON podetailgroup.PurchaseOrderId = po.PurchaseOrderId    
+    LEFT OUTER JOIN dbo.SupplierInvoiceDetails AS SIDetail WITH (NOLOCK) 
+        ON podetailgroup.NominalCodeId = SIDetail.NominalCodeId    
+        AND SI.SupplierInvoiceId = SIDetail.SupplierInvoiceId    
+    WHERE po.PurchaseOrderNo IN ('A001/2023/2244', 'A016/2023/662')
+    AND NominalCode IN ('50250', '71030')
+)
+
+-- Calculating the cumulative Outstanding value based on previous rows
+SELECT 
+    CTE.PurchaseOrderNo,
+    CTE.NominalCode,
+    CTE.TotalPOAmount,
+    CTE.InvoiceAmount,
+
+    CASE 
+        -- If Status is 3, set Outstanding to TotalPOAmount
+        WHEN CTE.SIStatus = 3 THEN CTE.TotalPOAmount
+
+        -- If Status is 4, calculate row-wise cumulative difference
+        WHEN CTE.SIStatus = 4 THEN 
+            CTE.BaseOutstanding - 
+            SUM(CTE.InvoiceAmount) OVER (PARTITION BY CTE.PurchaseOrderNo, CTE.NominalCode ORDER BY CTE.RowNumber ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+        
+        -- Default case if neither 3 nor 4
+        ELSE CTE.TotalPOAmount 
+    END AS Outstanding,
+
+    CTE.SIStatus,    
+    CTE.SICreatedDate,    
+    CTE.CreatedDate
+FROM CTE
+ORDER BY CTE.PurchaseOrderNo, CTE.SIStatus, CTE.SICreatedDate;
+```
+
+### Key Changes:
+1. **CTE**:
+   - Added `ROW_NUMBER()` to uniquely identify each row within the same `PurchaseOrderNo` and `NominalCode` to allow cumulative operations.
+   - Stored `BaseOutstanding` (the `TotalPOAmount`) for use in cumulative subtraction.
+
+2. **Cumulative Calculation**:
+   - Used `SUM() OVER()` to create a running total of `InvoiceAmount`, partitioned by `PurchaseOrderNo` and `NominalCode`, and ordered by `SICreatedDate`.
+   - Subtracted this cumulative sum from `BaseOutstanding` to calculate the `Outstanding` value dynamically based on previous invoices.
+
+3. **CASE Statement**:
+   - Handled different `SIStatus` values: if `SIStatus` is 3, `Outstanding` is set to `TotalPOAmount`. If it’s 4, the cumulative subtraction logic is applied.
+
+### Explanation:
+- **SUM() OVER()**: This window function calculates the cumulative sum of `InvoiceAmount` up to the current row, allowing you to dynamically subtract this from the original `TotalPOAmount`.
+- **PARTITION BY and ORDER BY**: Ensures that the cumulative sum is calculated separately for each combination of `PurchaseOrderNo` and `NominalCode`, and in the correct order (`SICreatedDate`).
+  
+This approach should resolve the issue of incorrectly calculated `Outstanding` values by applying the correct cumulative subtraction across rows.
