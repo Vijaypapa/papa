@@ -1,0 +1,82 @@
+The issue you're experiencing seems to be due to how the cumulative sum is calculated, especially for rows where the `SIStatus = 4`. For `SIStatus = 4`, the logic should indeed perform the subtraction: `Outstanding = TotalPOAmount - InvoiceAmount`, and it looks like it's not correctly accounting for that.
+
+Let me break down the fix:
+
+### Solution
+For `SIStatus = 4`, you need to ensure that each row calculates the outstanding amount using the difference between `TotalPOAmount` and the **cumulative sum** of `InvoiceAmount` from all previous rows (including the current one) for the same `PurchaseOrderNo` and `NominalCodeId`.
+
+I'll modify the query to correct the behavior for `SIStatus = 4`.
+
+### Revised Query
+```sql
+SELECT   
+    ISNULL(po.PurchaseOrderNo, '') AS PurchaseOrderNo,    
+    ISNULL(podetailgroup.NominalCode, '') AS NominalCode,    
+    podetailgroup.TotalPO AS TotalPOAmount,    
+    ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0) AS InvoiceAmount,  
+
+    CASE 
+        -- If Status is 3, set Outstanding to TotalPOAmount (since it's the first invoice)
+        WHEN SI.StatusId = 3 THEN podetailgroup.TotalPO  
+        
+        -- If Status is 4, perform cumulative subtraction of InvoiceAmount from TotalPOAmount
+        WHEN SI.StatusId = 4 THEN 
+            podetailgroup.TotalPO - 
+            SUM(ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0))
+            OVER (
+                PARTITION BY podetailgroup.PurchaseOrderId, podetailgroup.NominalCodeId 
+                ORDER BY SI.InvoiceCreateDate, SI.SupplierInvoiceId 
+                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+            )
+        
+        -- Default case if neither 3 nor 4, use TotalPOAmount as fallback
+        ELSE podetailgroup.TotalPO 
+    END AS Outstanding,
+ 
+    SI.StatusId AS SIStatus,    
+    SI.InvoiceCreateDate AS SICreatedDate,    
+    po.CreatedDate    
+FROM dbo.PurchaseOrders AS po WITH (NOLOCK)    
+INNER JOIN dbo.Suppliers AS supplier WITH (NOLOCK) ON supplier.SupplierId = po.SupplierId    
+LEFT OUTER JOIN dbo.SupplierInvoices AS SI WITH (NOLOCK) ON SI.PurchaseOrderId = po.PurchaseOrderId    
+INNER JOIN (    
+    SELECT podetail.PurchaseOrderId AS PurchaseOrderId,    
+           podetail.NominalCodeId AS NominalCodeId,    
+           ncode.NominalCode NominalCode,    
+           SUM(podetail.Total + ISNULL(podetail.Delivery, 0)) AS TotalPO    
+    FROM PurchaseOrdersDetails podetail    
+    INNER JOIN NominalCodes ncode ON ncode.NominalCodeId = podetail.NominalCodeId    
+    GROUP BY podetail.PurchaseOrderId, podetail.NominalCodeId, ncode.NominalCode    
+) podetailgroup ON podetailgroup.PurchaseOrderId = po.PurchaseOrderId    
+LEFT OUTER JOIN dbo.SupplierInvoiceDetails AS SIDetail WITH (NOLOCK) ON podetailgroup.NominalCodeId = SIDetail.NominalCodeId    
+    AND SI.SupplierInvoiceId = SIDetail.SupplierInvoiceId    
+WHERE po.PurchaseOrderNo IN ('A001/2023/2244', 'A016/2023/662')
+AND NominalCode IN ('50250', '71030')
+ORDER BY po.PurchaseOrderNo, SI.StatusId, SI.InvoiceCreateDate;
+```
+
+### Explanation of the Fix:
+1. **Cumulative Subtraction for `SIStatus = 4`**:
+   - The query uses the `SUM()` window function to calculate the cumulative sum of `InvoiceAmount` (`SITotalAmount` + `Delivery`) for each row with `SIStatus = 4`.
+   - This cumulative sum is subtracted from `TotalPOAmount`, ensuring that for the second row of `SIStatus = 4`, you get `0` as the outstanding amount, which is what you're expecting.
+
+2. **Handling `SIStatus = 3`**:
+   - When `SIStatus = 3`, the query sets `Outstanding` to `TotalPOAmount`, which is correct since it's the first invoice in the series.
+
+### Expected Output for Your Data:
+#### Input Data:
+| PurchaseOrderNo   | NominalCode | TotalPOAmount | InvoiceAmount | SIStatus |
+|-------------------|-------------|---------------|---------------|----------|
+| A001/2023/2244    | 71030       | 8430          | 8430          | 3        |
+| A001/2023/2244    | 71030       | 8430          | 8430          | 4        |
+| A016/2023/662     | 50250       | 3416.9        | 769.5         | 4        |
+
+#### Expected Output:
+| PurchaseOrderNo   | NominalCode | TotalPOAmount | InvoiceAmount | Outstanding | SIStatus |
+|-------------------|-------------|---------------|---------------|-------------|----------|
+| A001/2023/2244    | 71030       | 8430          | 8430          | 8430        | 3        |
+| A001/2023/2244    | 71030       | 8430          | 8430          | 0           | 4        |
+| A016/2023/662     | 50250       | 3416.9        | 769.5         | 2647.4      | 4        |
+
+### Testing:
+Test this query with your data to ensure that the outstanding amount behaves as expected, particularly for rows with `SIStatus = 4`. This should now correctly calculate the outstanding amount for each Purchase Order.
