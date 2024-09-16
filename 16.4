@@ -1,0 +1,155 @@
+USE [StudentCastlePOSystem_Staging]
+GO
+ 
+/****** Object:  View [dbo].[View_PurchaseOrderDetailsReport]    Script Date: 16-09-2024 08:09:38 ******/
+SET ANSI_NULLS ON
+GO
+ 
+SET QUOTED_IDENTIFIER ON
+GO
+ 
+ 
+--create view View_PurchaseOrderDetailsReport_1609 as  
+SELECT   
+    ISNULL(po.PurchaseOrderNo, '') AS PurchaseOrderNo,    
+    --ISNULL(po.SiteName, '') AS SiteName,    
+    --Stuff((    
+    --   SELECT ';' + Cast(mat.materialname AS VARCHAR(max))    
+    --   FROM materials mat    
+    --   WHERE mat.materialid IN (    
+    --     SELECT MaterialId    
+    --     FROM PurchaseOrdersDetails AS pod1    
+    --     WHERE pod1.PurchaseOrderId = podetailgroup.PurchaseOrderId    
+    --      AND pod1.NominalCodeId = podetailgroup.NominalCodeId    
+    --     )    
+    --   FOR XML path('')    
+    --), 1, 1, '') AS MaterialName,    
+    ISNULL(podetailgroup.NominalCode, '') AS NominalCode,    
+    --ISNULL(podetailgroup.NominalCodeName, '') AS NominalCodeDesc,    
+    --ISNULL(po.CreatorName, '') AS POCreator,    
+    --dbo.GetPurchaseOrderAuthorizers(po.PurchaseOrderId) AS POAuthoriser,    
+    --supplier.RefNo AS SupplierSageCode,    
+    --ISNULL(po.SupplierName, '') AS SupplierName,    
+    --ISNULL(po.SupplierAdd, '') AS SupplierAddress,    
+    --ISNULL(po.PaymentTerm, '') AS PaymentTerm,    
+    --po.CreatedDate AS PODate,    
+    podetailgroup.TotalPO AS TotalPOAmount,    
+    ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0) AS InvoiceAmount,  
+   --case when  SI.StatusId=3  Then podetailgroup.TotalPO - SUM(ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0))   
+   --     OVER (PARTITION BY podetailgroup.PurchaseOrderId, podetailgroup.NominalCodeId   
+   --           ORDER BY SI.InvoiceCreateDate)  else
+   -- podetailgroup.TotalPO - SUM(ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0))   
+   --     OVER (PARTITION BY podetailgroup.PurchaseOrderId, podetailgroup.NominalCodeId   
+   --           ORDER BY SI.InvoiceCreateDate) end AS Outstanding,  
+
+ CASE 
+        -- If Status is 3, set Outstanding to TotalPOAmount
+        WHEN SI.StatusId = 3 THEN podetailgroup.TotalPO  
+        
+        -- If Status is 4, perform cumulative subtraction of InvoiceAmount
+        WHEN SI.StatusId = 4 THEN 
+            podetailgroup.TotalPO - 
+            SUM(ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0))
+            OVER (
+                PARTITION BY podetailgroup.PurchaseOrderId, podetailgroup.NominalCodeId 
+                ORDER BY SI.InvoiceCreateDate, SI.SupplierInvoiceId 
+                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+            )
+        
+        -- Default case if neither 3 nor 4, we can still use TotalPOAmount as fallback
+        ELSE podetailgroup.TotalPO 
+    END AS Outstanding,
+ 
+--case
+ 
+--    when SI.StatusId = 3 then podetailgroup.TotalPO  -- If SIStatus = 3, Outstanding = TotalPOAmount
+ 
+--    when SI.StatusId = 4 then
+ 
+--        podetailgroup.TotalPO - SUM(ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0))
+ 
+--        OVER (PARTITION BY podetailgroup.PurchaseOrderId, podetailgroup.NominalCodeId
+ 
+--              ORDER BY SI.InvoiceCreateDate ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+ 
+--    else podetailgroup.TotalPO  -- Default case for other statuses
+ 
+--end AS Outstanding,
+ 
+    --ISNULL(po.Delivery, 0) AS Delivery,    
+    --ISNULL(po.Remarks, '') AS PORemarks,    
+    --ISNULL(po.RejectRemarks, '') AS PORejectRemarks,    
+    --ISNULL(ISNULL(podetailgroup.Quantity, 0) * ISNULL(podetailgroup.Rate, 0) * ISNULL(podetailgroup.TotalVat, 0) / 100, 0) AS POTotalVatAmount,    
+    --ISNULL((podetailgroup.Quantity * podetailgroup.Rate), 0) AS PONetAmount,    
+    --po.StatusId AS POStatus,    
+    SI.StatusId AS SIStatus,    
+    --ISNULL(SI.SupplierInvoiceNo, '') AS AGINo,    
+    --ISNULL(PurI.PurchaseInvoiceId, '') AS UniqueInvoiceNo,    
+    --ISNULL(SI.BillNo, '') AS InvoiceNo,    
+    --SI.BillDate AS InvoiceDate,    
+    --SI.DueDate AS InvoiceDueDate,    
+    SI.InvoiceCreateDate AS SICreatedDate,    
+    --(    
+    --  SELECT SUM(ISNULL(sd.SITotalAmount, 0) + ISNULL(sd.Delivery, 0)) AS Expr1    
+    --  FROM dbo.SupplierInvoices AS s WITH (NOLOCK)    
+    --  INNER JOIN dbo.SupplierInvoiceDetails AS sd WITH (NOLOCK) ON s.SupplierInvoiceId = sd.SupplierInvoiceId    
+    --  WHERE (s.PurchaseOrderId = po.PurchaseOrderId)    
+    --   AND (sd.NominalCodeId = podetailgroup.NominalCodeId)    
+    --   AND (    
+    --    s.StatusId NOT IN (5, 3)    
+    --    )    
+    --) AS TotalInvoiceAmount,    
+    --ISNULL(SIDetail.VatAmount, 0) AS InvoiceVatAmount,    
+    --ISNULL(SIDetail.VatPer, 0) AS InvoiceVatPercentage,    
+    --ISNULL(SIDetail.FromDate, '') AS FromDate,    
+    --ISNULL(SIDetail.ToDate, '') AS ToDate,    
+    --ISNULL(SI.AuthoriserName, '') AS InvoiceAuthoriser,    
+    --ISNULL(SI.Remarks, '') AS SIRemarks,    
+    --ISNULL(SI.QueryRemarks, '') AS SIQueryRemarks,    
+    --ISNULL(PaymentMode.PaymentMode, '') AS PaymentMode,    
+    --ISNULL(SI.PaymentReferenceNo, '') AS PaymentRefNo,    
+    --SI.PaymentReferenceDate AS PaymentRefDate,    
+    --ISNULL(po.FinanceRemarks, '') AS FinanceRemarks,    
+    --SI.AuthoriseDate AS SIAuthoriserDate,    
+    ----po.Authorisedate AS AuthoriserDate,    
+    --ISNULL(po.POType, '') AS POType,    
+    --po.Siteid,    
+    po.CreatedDate    
+FROM dbo.PurchaseOrders AS po WITH (NOLOCK)    
+INNER JOIN dbo.Suppliers AS supplier WITH (NOLOCK) ON supplier.SupplierId = po.SupplierId    
+LEFT OUTER JOIN dbo.SupplierInvoices AS SI WITH (NOLOCK) ON SI.PurchaseOrderId = po.PurchaseOrderId    
+INNER JOIN (    
+    SELECT podetail.PurchaseOrderId AS PurchaseOrderId,    
+           podetail.NominalCodeId AS NominalCodeId,    
+           ncode.NominalCode NominalCode,    
+           ncode.NominalCodeName NominalCodeName,    
+           SUM(podetail.Total + ISNULL(podetail.Delivery, 0)) AS TotalPO,    
+           SUM(podetail.Vat) AS TotalVat,    
+           SUM(podetail.Rate) AS Rate,    
+           SUM(podetail.Quantity) AS Quantity    
+    FROM PurchaseOrdersDetails podetail    
+    INNER JOIN NominalCodes ncode ON ncode.NominalCodeId = podetail.NominalCodeId    
+    GROUP BY podetail.PurchaseOrderId, podetail.NominalCodeId, ncode.NominalCode, ncode.NominalCodeName    
+) podetailgroup ON podetailgroup.PurchaseOrderId = po.PurchaseOrderId    
+LEFT OUTER JOIN dbo.SupplierInvoiceDetails AS SIDetail WITH (NOLOCK) ON podetailgroup.NominalCodeId = SIDetail.NominalCodeId    
+    AND SI.SupplierInvoiceId = SIDetail.SupplierInvoiceId    
+LEFT OUTER JOIN dbo.PaymentModes AS PaymentMode WITH (NOLOCK) ON PaymentMode.PaymentModeId = SI.PaymentModeId    
+LEFT OUTER JOIN dbo.PurchaseInvoices AS PurI WITH (NOLOCK) ON PurI.SupplierInvoiceId = SI.SupplierInvoiceId    
+    AND PurI.PurchaseInvoiceStatusId = 8    
+	WHERE po.PurchaseOrderNo IN ('A001/2023/2244','A016/2023/662') 
+AND NominalCode IN ('50250','71030')
+ORDER BY po.PurchaseOrderNo, SI.StatusId, SI.InvoiceCreateDate
+
+Data - 
+
+PurchaseOrderNo	NominalCode	TotalPOAmount	InvoiceAmount	Outstanding	SIStatus	SICreatedDate	CreatedDate
+A001/2023/2244	71030	8430.00	8430.00	8430.00	3	2023-11-28 16:49:43.473	2023-11-27 12:47:27.190
+A001/2023/2244	71030	8430.00	8430.00	-8430.00	4	2023-11-29 08:28:26.640	2023-11-27 12:47:27.190
+A016/2023/662	50250	3416.90	0.00	3416.90	4	2023-11-29 14:24:42.007	2023-07-26 16:50:46.320
+A016/2023/662	50250	3416.90	0.00	3416.90	4	2023-11-29 14:27:20.880	2023-07-26 16:50:46.320
+
+for row number 2 still getting Outstanding -8430.00 thet should come 0 because SIStatus is 4
+TotalPOAmount	InvoiceAmount
+8430.00			8430.00
+
+Outstanding = TotalPOAmount - InvoiceAmount
