@@ -1,0 +1,39 @@
+The issue you're facing arises due to incorrect logic in calculating the `Outstanding` amount. Based on your requirement, you need to subtract the `InvoiceAmount` of the current row from the `Outstanding` value of the previous row. Below is a basic SQL query logic that can handle the correct cumulative subtraction:
+
+### SQL Update:
+
+```sql
+WITH CTE AS (
+    SELECT 
+        ROW_NUMBER() OVER (PARTITION BY PurchaseOrderNo ORDER BY SICreatedDate) AS RowNumber,
+        PurchaseOrderNo,
+        Outstanding,
+        InvoiceAmount
+    FROM YourTable
+)
+UPDATE CTE1
+SET Outstanding = CTE1.PreviousOutstanding - CTE1.InvoiceAmount
+FROM (
+    SELECT 
+        CTE1.PurchaseOrderNo,
+        CTE1.RowNumber,
+        CTE1.InvoiceAmount,
+        ISNULL(CTE2.Outstanding, CTE1.Outstanding) AS PreviousOutstanding
+    FROM CTE CTE1
+    LEFT JOIN CTE CTE2 ON CTE1.RowNumber = CTE2.RowNumber + 1 
+    AND CTE1.PurchaseOrderNo = CTE2.PurchaseOrderNo
+) CTE1
+WHERE CTE1.RowNumber > 1;
+```
+
+### Key Changes:
+1. **Row Number Calculation**: We use `ROW_NUMBER()` to order the rows by `SICreatedDate` within each `PurchaseOrderNo` group.
+2. **Previous Outstanding Calculation**: For each row, the `Outstanding` value is calculated as the `Outstanding` from the previous row minus the current row's `InvoiceAmount`.
+3. **Update**: We update the `Outstanding` value by subtracting the `InvoiceAmount` of the current row from the `Outstanding` of the previous row.
+
+### Explanation:
+- **CTE**: This creates a common table expression (CTE) with ordered rows within each `PurchaseOrderNo`.
+- **Self-join**: In the main query, the CTE is self-joined on the row number to access the previous row's `Outstanding` value.
+- **Update**: The final `Outstanding` value for each row (except the first one) is updated based on the subtraction logic.
+
+This should give you the correct cumulative calculation for the `Outstanding` column.
