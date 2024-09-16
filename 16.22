@@ -1,0 +1,110 @@
+To handle the condition where if `Outstanding` and `InvoiceAmount` are the same for cumulative calculations, you want to set `Outstanding` to 0, you can adjust the calculation in the `CASE` statement accordingly. 
+
+Here's how you can modify the SQL query to meet this requirement:
+
+1. **Add a `CumulativeOutstandingAmount` to track the cumulative Outstanding value:**
+
+   We will introduce an additional CTE to calculate the cumulative Outstanding value and then check if the `Outstanding` and `InvoiceAmount` are the same.
+
+2. **Adjust the `CASE` statement to account for this condition:**
+
+   If the `Outstanding` equals `InvoiceAmount`, then set `Outstanding` to 0; otherwise, use the cumulative calculation.
+
+Here's the updated query:
+
+```sql
+WITH CTE AS (
+    SELECT   
+        ISNULL(po.PurchaseOrderNo, '') AS PurchaseOrderNo,    
+        ISNULL(podetailgroup.NominalCode, '') AS NominalCode,    
+        podetailgroup.TotalPO AS TotalPOAmount,    
+        ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0) AS InvoiceAmount,  
+        SI.StatusId AS SIStatus,    
+        SI.InvoiceCreateDate AS SICreatedDate,    
+        po.CreatedDate,
+        
+        -- Calculate the row number for ordering within each PurchaseOrderNo and NominalCode
+        ROW_NUMBER() OVER (PARTITION BY po.PurchaseOrderNo, podetailgroup.NominalCode ORDER BY SI.InvoiceCreateDate) AS RowNumber,
+
+        -- Calculate the cumulative sum of InvoiceAmount
+        SUM(ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0)) OVER (
+            PARTITION BY po.PurchaseOrderNo, podetailgroup.NominalCode 
+            ORDER BY SI.InvoiceCreateDate 
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS CumulativeInvoiceAmount,
+
+        -- Get the TotalPOAmount for later calculations
+        podetailgroup.TotalPO AS BaseOutstanding
+    FROM dbo.PurchaseOrders AS po WITH (NOLOCK)    
+    INNER JOIN dbo.Suppliers AS supplier WITH (NOLOCK) ON supplier.SupplierId = po.SupplierId    
+    LEFT OUTER JOIN dbo.SupplierInvoices AS SI WITH (NOLOCK) ON SI.PurchaseOrderId = po.PurchaseOrderId    
+    INNER JOIN (    
+        SELECT podetail.PurchaseOrderId AS PurchaseOrderId,    
+               podetail.NominalCodeId AS NominalCodeId,    
+               ncode.NominalCode NominalCode,    
+               SUM(podetail.Total + ISNULL(podetail.Delivery, 0)) AS TotalPO    
+        FROM PurchaseOrdersDetails podetail    
+        INNER JOIN NominalCodes ncode ON ncode.NominalCodeId = podetail.NominalCodeId    
+        GROUP BY podetail.PurchaseOrderId, podetail.NominalCodeId, ncode.NominalCode    
+    ) podetailgroup ON podetailgroup.PurchaseOrderId = po.PurchaseOrderId    
+    LEFT OUTER JOIN dbo.SupplierInvoiceDetails AS SIDetail WITH (NOLOCK) 
+        ON podetailgroup.NominalCodeId = SIDetail.NominalCodeId    
+        AND SI.SupplierInvoiceId = SIDetail.SupplierInvoiceId    
+    WHERE po.PurchaseOrderNo IN ('A001/2023/2244', 'A016/2023/662')
+    AND NominalCode IN ('50250', '71030')
+)
+
+, CTE_Cumulative AS (
+    SELECT
+        PurchaseOrderNo,
+        NominalCode,
+        TotalPOAmount,
+        InvoiceAmount,
+        SIStatus,
+        SICreatedDate,
+        CreatedDate,
+        -- Calculate cumulative Outstanding amount
+        CASE 
+            -- If Status is 3, set Outstanding to TotalPOAmount
+            WHEN SIStatus = 3 THEN TotalPOAmount
+
+            -- If Status is 4, calculate cumulative Outstanding value
+            WHEN SIStatus = 4 THEN 
+                BaseOutstanding - 
+                CumulativeInvoiceAmount
+
+            -- Default case if neither 3 nor 4
+            ELSE TotalPOAmount 
+        END AS Outstanding
+    FROM CTE
+)
+
+-- Final calculation to check if Outstanding equals InvoiceAmount and adjust to 0 if so
+SELECT 
+    PurchaseOrderNo,
+    NominalCode,
+    TotalPOAmount,
+    InvoiceAmount,
+
+    CASE
+        -- If Outstanding is equal to InvoiceAmount, set Outstanding to 0
+        WHEN Outstanding = InvoiceAmount THEN 0
+        
+        -- Otherwise, use the calculated Outstanding
+        ELSE Outstanding
+    END AS Outstanding,
+
+    SIStatus,    
+    SICreatedDate,    
+    CreatedDate
+FROM CTE_Cumulative
+ORDER BY PurchaseOrderNo, SIStatus, SICreatedDate;
+```
+
+### Explanation:
+
+1. **CTE**: This calculates the initial cumulative values and row numbers.
+2. **CTE_Cumulative**: This calculates the `Outstanding` based on the cumulative invoice amounts.
+3. **Final SELECT**: Checks if the `Outstanding` equals `InvoiceAmount` and adjusts it to 0 if they are equal.
+
+This approach ensures that if `Outstanding` and `InvoiceAmount` are the same, it is set to 0, while other values are calculated based on the cumulative amounts.
