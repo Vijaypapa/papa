@@ -1,0 +1,65 @@
+I see. It seems the issue may require more specific control over how we handle cumulative subtraction for rows with `SIStatus = 4`. To ensure the calculation for `Outstanding` works properly, especially in cumulative cases, we need to adjust the logic carefully. I'll revise the query to correctly handle both the initial case where `SIStatus = 3` and the cumulative case for `SIStatus = 4`.
+
+### Solution: Row-based Calculation with `SUM() OVER`
+
+We'll make sure that:
+- For `SIStatus = 3`, the `Outstanding` is simply the `TotalPOAmount`.
+- For `SIStatus = 4`, we perform a running subtraction of `InvoiceAmount` from the previous row's `Outstanding` for the same `PurchaseOrderNo` and `NominalCodeId`.
+
+Here is the **revised query** for calculating `Outstanding`:
+
+### Revised Query
+```sql
+SELECT 
+    -- other columns...
+    CASE 
+        -- If Status is 3, set Outstanding to TotalPOAmount
+        WHEN SI.StatusId = 3 THEN podetailgroup.TotalPO  
+        
+        -- If Status is 4, perform cumulative subtraction of InvoiceAmount
+        WHEN SI.StatusId = 4 THEN 
+            podetailgroup.TotalPO - 
+            SUM(ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0))
+            OVER (
+                PARTITION BY podetailgroup.PurchaseOrderId, podetailgroup.NominalCodeId 
+                ORDER BY SI.InvoiceCreateDate, SI.SupplierInvoiceId 
+                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+            )
+        
+        -- Default case if neither 3 nor 4, we can still use TotalPOAmount as fallback
+        ELSE podetailgroup.TotalPO 
+    END AS Outstanding
+FROM 
+    -- your joins and other conditions remain the same...
+```
+
+### Key Changes:
+1. **Order by Invoice Date and Invoice ID**: We added `SI.SupplierInvoiceId` to the `ORDER BY` clause to ensure that for each `PurchaseOrderId`, the invoices are correctly ordered when performing the cumulative calculation. This prevents wrong accumulations.
+   
+2. **Cumulative subtraction**: The logic now ensures that for `SIStatus = 4`, each row's `Outstanding` is subtracted from the previous row's `Outstanding` based on the total invoice amount for the same `PurchaseOrderId` and `NominalCodeId`.
+
+3. **Handling different statuses**: The query handles `SIStatus = 3` by assigning the full `TotalPOAmount` and subtracts cumulatively when `SIStatus = 4`.
+
+### Testing the Logic:
+Let's go through your example:
+
+#### Input Data:
+| PurchaseOrderNo   | NominalCode | TotalPOAmount | InvoiceAmount | Outstanding | SIStatus | UniqueInvoiceNo |
+|-------------------|-------------|---------------|---------------|-------------|----------|-----------------|
+| A001/2023/2244    | 71030       | 8430          | 8430          | ?           | 3        | 6245            |
+| A001/2023/2244    | 71030       | 8430          | 8430          | ?           | 4        | 6247            |
+| A016/2023/662     | 50250       | 3416.9        | 769.5         | ?           | 4        | 6000            |
+
+#### Expected Output:
+- **Row 1** (`SIStatus = 3`): `Outstanding = 8430` (same as `TotalPOAmount`)
+- **Row 2** (`SIStatus = 4`): `Outstanding = 8430 - 8430 = 0`
+- **Row 3** (`SIStatus = 4`): `Outstanding = 3416.9 - 769.5 = 2647.4`
+
+### Testing Considerations:
+- Ensure the query partitions by `PurchaseOrderId` and `NominalCodeId` correctly.
+- The `ORDER BY` clause with both `SI.InvoiceCreateDate` and `SI.SupplierInvoiceId` ensures correct row sequencing for each Purchase Order.
+
+### Important Notes:
+- Make sure there are no `NULL` values in `InvoiceAmount`, as they could interfere with cumulative calculations. If needed, ensure you handle `NULL` values in the query properly.
+  
+Let me know if this resolves the issue, or if further tuning is needed!
