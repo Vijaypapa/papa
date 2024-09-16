@@ -1,0 +1,39 @@
+SELECT   
+    ISNULL(po.PurchaseOrderNo, '') AS PurchaseOrderNo,    
+    ISNULL(podetailgroup.NominalCode, '') AS NominalCode,    
+    podetailgroup.TotalPO AS TotalPOAmount,    
+    ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0) AS InvoiceAmount,  
+
+CASE 
+    -- If Status is 3, set Outstanding to TotalPOAmount
+    WHEN SI.StatusId = 3 THEN podetailgroup.TotalPO  
+    
+    -- If Status is 4, calculate row-wise difference between TotalPOAmount and InvoiceAmount for each invoice
+    WHEN SI.StatusId = 4 THEN 
+        podetailgroup.TotalPO - 
+        (ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0))
+        
+    -- Default case if neither 3 nor 4
+    ELSE podetailgroup.TotalPO 
+END AS Outstanding,
+ 
+    SI.StatusId AS SIStatus,    
+    SI.InvoiceCreateDate AS SICreatedDate,    
+    po.CreatedDate    
+FROM dbo.PurchaseOrders AS po WITH (NOLOCK)    
+INNER JOIN dbo.Suppliers AS supplier WITH (NOLOCK) ON supplier.SupplierId = po.SupplierId    
+LEFT OUTER JOIN dbo.SupplierInvoices AS SI WITH (NOLOCK) ON SI.PurchaseOrderId = po.PurchaseOrderId    
+INNER JOIN (    
+    SELECT podetail.PurchaseOrderId AS PurchaseOrderId,    
+           podetail.NominalCodeId AS NominalCodeId,    
+           ncode.NominalCode NominalCode,    
+           SUM(podetail.Total + ISNULL(podetail.Delivery, 0)) AS TotalPO    
+    FROM PurchaseOrdersDetails podetail    
+    INNER JOIN NominalCodes ncode ON ncode.NominalCodeId = podetail.NominalCodeId    
+    GROUP BY podetail.PurchaseOrderId, podetail.NominalCodeId, ncode.NominalCode    
+) podetailgroup ON podetailgroup.PurchaseOrderId = po.PurchaseOrderId    
+LEFT OUTER JOIN dbo.SupplierInvoiceDetails AS SIDetail WITH (NOLOCK) ON podetailgroup.NominalCodeId = SIDetail.NominalCodeId    
+    AND SI.SupplierInvoiceId = SIDetail.SupplierInvoiceId    
+WHERE po.PurchaseOrderNo IN ('A001/2023/2244', 'A016/2023/662')
+AND NominalCode IN ('50250', '71030')
+ORDER BY po.PurchaseOrderNo, SI.StatusId, SI.InvoiceCreateDate;
