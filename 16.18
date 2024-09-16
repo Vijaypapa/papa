@@ -1,0 +1,89 @@
+To correct the calculation of `Outstanding` values while allowing for negative values when necessary, follow these steps:
+
+1. **Calculate the cumulative `InvoiceAmount` up to the current row.**
+2. **Subtract this cumulative sum from the initial `TotalPOAmount` to get the correct `Outstanding` value for each row.**
+
+The main adjustment here is to ensure that the `Outstanding` value is calculated correctly based on the cumulative sum of `InvoiceAmount` up to the current row.
+
+Here’s how you can adjust the SQL query to implement the correct logic:
+
+```sql
+WITH CTE AS (
+    SELECT   
+        ISNULL(po.PurchaseOrderNo, '') AS PurchaseOrderNo,    
+        ISNULL(podetailgroup.NominalCode, '') AS NominalCode,    
+        podetailgroup.TotalPO AS TotalPOAmount,    
+        ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0) AS InvoiceAmount,  
+        SI.StatusId AS SIStatus,    
+        SI.InvoiceCreateDate AS SICreatedDate,    
+        po.CreatedDate,
+        
+        -- Calculate the row number for ordering within each PurchaseOrderNo and NominalCode
+        ROW_NUMBER() OVER (PARTITION BY po.PurchaseOrderNo, podetailgroup.NominalCode ORDER BY SI.InvoiceCreateDate) AS RowNumber,
+
+        -- Get the TotalPOAmount for later calculations
+        podetailgroup.TotalPO AS BaseOutstanding
+    FROM dbo.PurchaseOrders AS po WITH (NOLOCK)    
+    INNER JOIN dbo.Suppliers AS supplier WITH (NOLOCK) ON supplier.SupplierId = po.SupplierId    
+    LEFT OUTER JOIN dbo.SupplierInvoices AS SI WITH (NOLOCK) ON SI.PurchaseOrderId = po.PurchaseOrderId    
+    INNER JOIN (    
+        SELECT podetail.PurchaseOrderId AS PurchaseOrderId,    
+               podetail.NominalCodeId AS NominalCodeId,    
+               ncode.NominalCode NominalCode,    
+               SUM(podetail.Total + ISNULL(podetail.Delivery, 0)) AS TotalPO    
+        FROM PurchaseOrdersDetails podetail    
+        INNER JOIN NominalCodes ncode ON ncode.NominalCodeId = podetail.NominalCodeId    
+        GROUP BY podetail.PurchaseOrderId, podetail.NominalCodeId, ncode.NominalCode    
+    ) podetailgroup ON podetailgroup.PurchaseOrderId = po.PurchaseOrderId    
+    LEFT OUTER JOIN dbo.SupplierInvoiceDetails AS SIDetail WITH (NOLOCK) 
+        ON podetailgroup.NominalCodeId = SIDetail.NominalCodeId    
+        AND SI.SupplierInvoiceId = SIDetail.SupplierInvoiceId    
+    WHERE po.PurchaseOrderNo IN ('A001/2023/2244', 'A016/2023/662')
+    AND NominalCode IN ('50250', '71030')
+)
+
+-- Calculating the Outstanding value based on cumulative InvoiceAmount
+SELECT 
+    CTE.PurchaseOrderNo,
+    CTE.NominalCode,
+    CTE.TotalPOAmount,
+    CTE.InvoiceAmount,
+
+    CASE 
+        -- If Status is 3, set Outstanding to TotalPOAmount
+        WHEN CTE.SIStatus = 3 THEN CTE.TotalPOAmount
+
+        -- If Status is 4, calculate row-wise cumulative difference
+        WHEN CTE.SIStatus = 4 THEN 
+            CTE.BaseOutstanding - 
+            SUM(CTE.InvoiceAmount) OVER (
+                PARTITION BY CTE.PurchaseOrderNo, CTE.NominalCode 
+                ORDER BY CTE.RowNumber 
+                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+            )
+        
+        -- Default case if neither 3 nor 4
+        ELSE CTE.TotalPOAmount 
+    END AS Outstanding,
+
+    CTE.SIStatus,    
+    CTE.SICreatedDate,    
+    CTE.CreatedDate
+FROM CTE
+ORDER BY CTE.PurchaseOrderNo, CTE.SIStatus, CTE.SICreatedDate;
+```
+
+### Key Points:
+1. **`ROW_NUMBER()`**:
+   - This ensures each row within a partition has a unique number based on `InvoiceCreateDate`, which is crucial for correct cumulative calculations.
+
+2. **`SUM() OVER()`**:
+   - Calculates the cumulative `InvoiceAmount` from the start of the partition up to the current row, allowing you to subtract this cumulative total from the initial `TotalPOAmount` to get the correct `Outstanding`.
+
+3. **`PARTITION BY` and `ORDER BY`**:
+   - These clauses ensure the cumulative calculation is done separately for each `PurchaseOrderNo` and `NominalCode` and is ordered correctly.
+
+4. **`CASE` Statement**:
+   - Handles different `SIStatus` values: For `SIStatus = 3`, `Outstanding` is just the `TotalPOAmount`. For `SIStatus = 4`, it applies the cumulative subtraction logic.
+
+By using this approach, you should get accurate `Outstanding` values, even if they are negative, reflecting the correct state of the outstanding amounts after processing each invoice.
