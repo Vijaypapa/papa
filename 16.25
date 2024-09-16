@@ -1,0 +1,126 @@
+To ensure that the `Outstanding` value is calculated correctly for `SIStatus = 4`, particularly for the first occurrence where `SIStatus = 4`, you can modify the logic to check if the current row is the first instance of `SIStatus = 4` for each `PurchaseOrderNo` and `NominalCode`. 
+
+Here’s how you can adjust the query:
+
+1. **Calculate the `Outstanding` value as before.**
+2. **Ensure that for the first row with `SIStatus = 4`, `Outstanding` is calculated as `TotalPOAmount - InvoiceAmount`.**
+
+```sql
+WITH CTE AS (
+    SELECT   
+        ISNULL(po.PurchaseOrderNo, '') AS PurchaseOrderNo,    
+        ISNULL(podetailgroup.NominalCode, '') AS NominalCode,    
+        podetailgroup.TotalPO AS TotalPOAmount,    
+        ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0) AS InvoiceAmount,  
+        SI.StatusId AS SIStatus,    
+        SI.InvoiceCreateDate AS SICreatedDate,    
+        po.CreatedDate,
+        
+        -- Calculate the row number for ordering within each PurchaseOrderNo and NominalCode
+        ROW_NUMBER() OVER (PARTITION BY po.PurchaseOrderNo, podetailgroup.NominalCode ORDER BY SI.InvoiceCreateDate) AS RowNumber,
+
+        -- Calculate the cumulative sum of InvoiceAmount
+        SUM(ISNULL(SIDetail.SITotalAmount, 0) + ISNULL(SIDetail.Delivery, 0)) OVER (
+            PARTITION BY po.PurchaseOrderNo, podetailgroup.NominalCode 
+            ORDER BY SI.InvoiceCreateDate 
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS CumulativeInvoiceAmount,
+
+        -- Get the TotalPOAmount for later calculations
+        podetailgroup.TotalPO AS BaseOutstanding
+    FROM dbo.PurchaseOrders AS po WITH (NOLOCK)    
+    INNER JOIN dbo.Suppliers AS supplier WITH (NOLOCK) ON supplier.SupplierId = po.SupplierId    
+    LEFT OUTER JOIN dbo.SupplierInvoices AS SI WITH (NOLOCK) ON SI.PurchaseOrderId = po.PurchaseOrderId    
+    INNER JOIN (    
+        SELECT podetail.PurchaseOrderId AS PurchaseOrderId,    
+               podetail.NominalCodeId AS NominalCodeId,    
+               ncode.NominalCode NominalCode,    
+               SUM(podetail.Total + ISNULL(podetail.Delivery, 0)) AS TotalPO    
+        FROM PurchaseOrdersDetails podetail    
+        INNER JOIN NominalCodes ncode ON ncode.NominalCodeId = podetail.NominalCodeId    
+        GROUP BY podetail.PurchaseOrderId, podetail.NominalCodeId, ncode.NominalCode    
+    ) podetailgroup ON podetailgroup.PurchaseOrderId = po.PurchaseOrderId    
+    LEFT OUTER JOIN dbo.SupplierInvoiceDetails AS SIDetail WITH (NOLOCK) 
+        ON podetailgroup.NominalCodeId = SIDetail.NominalCodeId    
+        AND SI.SupplierInvoiceId = SIDetail.SupplierInvoiceId    
+    WHERE po.PurchaseOrderNo IN ('A001/2023/2244', 'A016/2023/662')
+    AND NominalCode IN ('50250', '71030')
+)
+
+, CTE_Cumulative AS (
+    SELECT
+        PurchaseOrderNo,
+        NominalCode,
+        TotalPOAmount,
+        InvoiceAmount,
+        SIStatus,
+        SICreatedDate,
+        CreatedDate,
+        -- Calculate cumulative Outstanding amount
+        CASE 
+            -- If Status is 3, set Outstanding to TotalPOAmount
+            WHEN SIStatus = 3 THEN TotalPOAmount
+
+            -- If Status is 4, calculate cumulative Outstanding value
+            WHEN SIStatus = 4 THEN 
+                BaseOutstanding - 
+                CumulativeInvoiceAmount
+
+            -- Default case if neither 3 nor 4
+            ELSE TotalPOAmount 
+        END AS Outstanding
+    FROM CTE
+)
+
+-- Final calculation to adjust Outstanding for the first occurrence of SIStatus = 4
+, CTE_Final AS (
+    SELECT 
+        PurchaseOrderNo,
+        NominalCode,
+        TotalPOAmount,
+        InvoiceAmount,
+        SIStatus,
+        SICreatedDate,
+        CreatedDate,
+        -- Identify the first occurrence of SIStatus = 4
+        ROW_NUMBER() OVER (PARTITION BY PurchaseOrderNo, NominalCode ORDER BY SICreatedDate) AS RowNum
+    FROM CTE_Cumulative
+)
+
+SELECT 
+    PurchaseOrderNo,
+    NominalCode,
+    TotalPOAmount,
+    InvoiceAmount,
+
+    CASE
+        -- For SIStatus = 4, set Outstanding to TotalPOAmount - InvoiceAmount for the first row only
+        WHEN SIStatus = 4 AND RowNum = 1 THEN TotalPOAmount - InvoiceAmount
+        
+        -- For SIStatus = 4, if Outstanding equals InvoiceAmount, set Outstanding to 0
+        WHEN SIStatus = 4 AND Outstanding = InvoiceAmount THEN 0
+        
+        -- For SIStatus = 4, if Outstanding is less than 0 but greater than InvoiceAmount, set Outstanding to Outstanding
+        WHEN SIStatus = 4 AND Outstanding < 0 THEN Outstanding
+        
+        -- Otherwise, use the calculated Outstanding
+        ELSE Outstanding
+    END AS Outstanding,
+
+    SIStatus,    
+    SICreatedDate,    
+    CreatedDate
+FROM CTE_Final
+ORDER BY PurchaseOrderNo, SIStatus, SICreatedDate;
+```
+
+### Explanation:
+
+1. **CTE**: Calculates basic values and cumulative sums.
+2. **CTE_Cumulative**: Calculates initial `Outstanding` values.
+3. **CTE_Final**: Adds a row number for each `PurchaseOrderNo` and `NominalCode` based on `SICreatedDate`.
+4. **Final SELECT**:
+   - For the first row with `SIStatus = 4`, the `Outstanding` is calculated as `TotalPOAmount - InvoiceAmount`.
+   - For other `SIStatus = 4` rows, additional logic ensures that `Outstanding` is correctly adjusted or set to 0.
+
+This approach should correctly handle the scenario where you want to set the `Outstanding` to `TotalPOAmount - InvoiceAmount` for the first occurrence of `SIStatus = 4`, and adjust the values accordingly for other rows.
