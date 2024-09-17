@@ -1,0 +1,114 @@
+Here is the complete C# code for appending data to an existing Excel file starting from row 9750 using the `Microsoft.Office.Interop.Excel` library:
+
+### Full Code:
+
+```csharp
+using System;
+using System.Data;
+using System.Data.SqlClient;
+using Excel = Microsoft.Office.Interop.Excel;
+
+class Program
+{
+    static void Main(string[] args)
+    {
+        string connectionString = "your-database-connection-string"; // Update your connection string here
+        string excelFilePath = @"C:\path\to\your\existing\file.xlsx"; // Update the path to your Excel file here
+
+        // Step 1: Fetch new data from the database
+        DataTable newData = GetNewDataFromDatabase(connectionString);
+
+        // Step 2: Open the existing Excel file
+        Excel.Application excelApp = new Excel.Application();
+        Excel.Workbook workbook = excelApp.Workbooks.Open(excelFilePath);
+        Excel.Worksheet worksheet = workbook.Sheets[1]; // Assuming you want to work with the first worksheet
+
+        // Step 3: Find the row to start appending (after 9749 rows)
+        int startRow = 9750;
+
+        // Step 4: Append new data to the Excel file
+        for (int i = 0; i < newData.Rows.Count; i++)
+        {
+            for (int j = 0; j < newData.Columns.Count; j++)
+            {
+                worksheet.Cells[startRow + i, j + 1] = newData.Rows[i][j];
+            }
+        }
+
+        // Step 5: Save and close the Excel file
+        workbook.Save();
+        workbook.Close();
+        excelApp.Quit();
+
+        // Step 6: Release COM objects to fully kill Excel process from the memory
+        ReleaseObject(worksheet);
+        ReleaseObject(workbook);
+        ReleaseObject(excelApp);
+
+        Console.WriteLine("Data appended successfully.");
+    }
+
+    // Method to fetch new data from the database
+    static DataTable GetNewDataFromDatabase(string connectionString)
+    {
+        DataTable dataTable = new DataTable();
+        using (SqlConnection connection = new SqlConnection(connectionString))
+        {
+            connection.Open();
+            string query = "SELECT * FROM YourTable WHERE YourConditions"; // Update with your actual query
+            using (SqlCommand command = new SqlCommand(query, connection))
+            {
+                SqlDataAdapter adapter = new SqlDataAdapter(command);
+                adapter.Fill(dataTable);
+            }
+        }
+        return dataTable;
+    }
+
+    // Method to release COM objects
+    static void ReleaseObject(object obj)
+    {
+        try
+        {
+            System.Runtime.InteropServices.Marshal.ReleaseComObject(obj);
+            obj = null;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Unable to release the object " + ex.ToString());
+            obj = null;
+        }
+        finally
+        {
+            GC.Collect();
+        }
+    }
+}
+```
+
+### Explanation:
+
+1. **SQL Data Fetching**: 
+   - The `GetNewDataFromDatabase` method retrieves new rows from the database. Replace `"SELECT * FROM YourTable WHERE YourConditions"` with your actual SQL query to get the data you need to append to the Excel file.
+   
+2. **Opening the Excel File**: 
+   - The code opens the existing Excel file (`excelFilePath`) using `Microsoft.Office.Interop.Excel.Application`. It loads the first worksheet (`worksheet = workbook.Sheets[1]`), assuming you want to work with the first sheet. Update this index if necessary.
+   
+3. **Appending Data**:
+   - The loop starts writing new data from row 9750 (`startRow = 9750`). For each row in the `DataTable`, it appends data to corresponding columns in Excel.
+
+4. **Saving and Closing**:
+   - The workbook is saved with `workbook.Save()` and closed with `workbook.Close()`. After that, the Excel application is quit using `excelApp.Quit()`.
+
+5. **Releasing COM Objects**:
+   - It is essential to release COM objects when working with `Interop.Excel` to ensure the Excel process does not stay in memory. The `ReleaseObject` method handles this for the worksheet, workbook, and Excel application.
+
+### Important Points:
+- **Replace Connection String**: Update the `connectionString` with your actual database connection string.
+- **Excel File Path**: Update the `excelFilePath` to point to your existing Excel file where you want to append the data.
+- **SQL Query**: Update the query in the `GetNewDataFromDatabase` method to fetch the correct data from your database.
+
+### Notes:
+- Ensure that your system has Excel installed as this method depends on the installed Excel application.
+- You need to have read/write permissions on the Excel file.
+- Ensure that you properly release COM objects, or you may experience Excel processes hanging in the background.
