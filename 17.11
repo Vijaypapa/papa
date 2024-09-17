@@ -1,0 +1,5 @@
+sharepoint file have already 9749 records
+for example input file have 100 records and table have already 500 records then now total records will 600 and will create export file of 600 records
+now for sharepoint file we have ro skip first 9749 records and insert 600 new records in sharepoint file after 9749 rows so it will
+9749+600 records in sharepoint file now if a new file of 100 records insert into table then in sharepoint
+9749+600+100 rows data.
