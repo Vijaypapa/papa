@@ -1,0 +1,127 @@
+If the CSV file you're dealing with does not contain 9749 rows but you need to ensure that new records are appended after 9749 existing rows in the SharePoint file, you'll need to:
+
+1. **Retrieve and Read the Existing SharePoint File**: Read the existing SharePoint file to determine its content and the total number of rows.
+2. **Read the New CSV File**: Read the new CSV file that contains the records you want to append.
+3. **Combine and Update the SharePoint File**: Append the new records to the existing SharePoint file data after the existing 9749 rows.
+
+Here’s how you can approach this:
+
+### Code Implementation
+
+1. **Retrieve Existing SharePoint File**:
+   - Download the existing SharePoint file (if it’s not already available locally) to read its content.
+
+2. **Combine New Records with Existing Records**:
+   - Append new records after the existing 9749 rows.
+
+3. **Upload Updated File to SharePoint**:
+   - Upload the modified file back to SharePoint.
+
+Here’s the detailed implementation:
+
+```csharp
+public async Task AppendNewRecordsToSharePointFileAsync(string newCsvFilePath)
+{
+    try
+    {
+        string tenantId = "6211af6a-7b73-4c38-9c98-d1c2f85da093"; // Tenant ID
+        string clientId = "57876615-02e7-491c-9fd0-419a9a690a80"; // Client ID
+        string clientSecret = ""; // Securely handle the Client Secret
+        string driveId = "b!2L0fIMt9J0mMDW_fuKB89Pngg3dAgy5Lidag8_qKydAJ4JeNq0iRQLtD8qa7lOud"; // Drive ID
+        string targetFolderPath = "/QXTestPhoneBOT"; // Target folder path on SharePoint
+        string sharePointFileName = "existingFile.csv"; // Existing SharePoint file name
+
+        var clientApp = ConfidentialClientApplicationBuilder.Create(clientId)
+            .WithClientSecret(clientSecret)
+            .WithAuthority(new Uri($"https://login.microsoftonline.com/{tenantId}"))
+            .Build();
+
+        var authResult = await clientApp.AcquireTokenForClient(new[] { "https://graph.microsoft.com/.default" }).ExecuteAsync();
+
+        var graphClient = new GraphServiceClient(new DelegateAuthenticationProvider(
+            (requestMessage) =>
+            {
+                requestMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", authResult.AccessToken);
+                return Task.CompletedTask;
+            }));
+
+        // Download the existing SharePoint file
+        var existingFileStream = new MemoryStream();
+        var existingFile = await graphClient.Drives[driveId]
+            .Root
+            .ItemWithPath($"{targetFolderPath}/{sharePointFileName}")
+            .Content
+            .Request()
+            .GetAsync();
+
+        await existingFile.CopyToAsync(existingFileStream);
+        existingFileStream.Position = 0;
+
+        // Read the existing SharePoint file
+        string[] existingFileLines;
+        using (var reader = new StreamReader(existingFileStream))
+        {
+            existingFileLines = reader.ReadToEnd().Split('\n');
+        }
+
+        // Read the new CSV file
+        var newFileLines = File.ReadAllLines(newCsvFilePath);
+
+        // Ensure the SharePoint file has at least 9749 rows
+        if (existingFileLines.Length < 9749)
+        {
+            throw new InvalidOperationException("Existing SharePoint file does not have enough rows to skip.");
+        }
+
+        // Combine existing rows after 9749 rows with new CSV file data
+        var linesToUpdate = new List<string>(existingFileLines.Take(9749));
+        linesToUpdate.AddRange(newFileLines);
+
+        // Create the updated file stream
+        using (var memoryStream = new MemoryStream())
+        {
+            using (var writer = new StreamWriter(memoryStream))
+            {
+                foreach (var line in linesToUpdate)
+                {
+                    writer.WriteLine(line);
+                }
+                writer.Flush();
+                memoryStream.Position = 0;
+
+                // Upload the updated file to SharePoint
+                var uploadResult = await graphClient.Drives[driveId]
+                    .Root
+                    .ItemWithPath($"{targetFolderPath}/{sharePointFileName}")
+                    .Content
+                    .Request()
+                    .PutAsync<DriveItem>(memoryStream);
+
+                LogToErrorFile($"File {uploadResult.Name} uploaded successfully to {targetFolderPath}.");
+            }
+        }
+    }
+    catch (ServiceException ex)
+    {
+        LogToErrorFile($"Error uploading file to SharePoint: {ex.Message}");
+    }
+    catch (Exception ex)
+    {
+        LogToErrorFile($"Unexpected error: {ex.Message}");
+    }
+}
+```
+
+### Explanation
+
+1. **Download Existing File**: Fetches the existing SharePoint file and reads its content.
+2. **Read New CSV**: Reads the new CSV file you want to append.
+3. **Combine Data**: Appends the new CSV data to the existing data starting from the 9749th row.
+4. **Upload Updated File**: Uploads the combined file back to SharePoint.
+
+### Considerations
+
+- **File Size**: Be mindful of file size limitations and performance. For very large files, you might need to handle data in chunks or use a more sophisticated approach.
+- **Error Handling**: Ensure that error handling is robust, especially when dealing with file I/O and network operations.
+
+This approach should help you append new records after 9749 existing rows in your SharePoint file effectively.
