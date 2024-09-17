@@ -1,0 +1,136 @@
+To update your code so that the `Inputfolder` and `Outputfolder` are created in the same folder where the `.exe` file resides, you can modify the paths to use the location of the executing assembly. Below are the key updates to the `ProcessFiles` method, where the folder paths are adjusted to the `.exe` location rather than the Downloads folder.
+
+Here is the updated version of your code:
+
+```csharp
+using System;
+using System.IO;
+using System.Linq;
+using iText.Kernel.Pdf;
+using iText.Kernel.Utils;
+using System.Text.RegularExpressions;
+using iText.Kernel.Pdf.Canvas.Parser;
+using System.Reflection;
+
+namespace PDFSplit
+{
+    public class FileProcessor
+    {
+        public void ProcessFiles()
+        {
+            // Get the directory where the .exe file is located
+            string exeDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+
+            // Define the input and output folder paths relative to the .exe location
+            string inputFolder = Path.Combine(exeDirectory, "Inputfolder");
+            string outputFolder = Path.Combine(exeDirectory, "Outputfolder");
+
+            // Ensure the folders exist
+            EnsureFolderExists(inputFolder);
+            EnsureFolderExists(outputFolder);
+
+            // Get all files in the input folder
+            var files = Directory.GetFiles(inputFolder);
+            foreach (var file in files)
+            {
+                ProcessFile(file, outputFolder);
+            }
+
+           // Console.WriteLine("Processing completed.");
+        }
+
+        private void EnsureFolderExists(string folderPath)
+        {
+            if (!Directory.Exists(folderPath))
+            {
+                Directory.CreateDirectory(folderPath);
+                // Console.WriteLine($"Created folder: {folderPath}");
+            }
+            else
+            {
+              //  Console.WriteLine($"Folder already exists: {folderPath}");
+            }
+        }
+
+        private void ProcessFile(string filePath, string outputFolder)
+        {
+            try
+            {
+                using (PdfReader reader = new PdfReader(filePath))
+                {
+                    using (PdfDocument pdfDoc = new PdfDocument(reader))
+                    {
+                        for (int i = 1; i <= pdfDoc.GetNumberOfPages(); i++)
+                        {
+                            string tempFilePath = Path.Combine(outputFolder, $"tempPage_{i}.pdf");
+                            using (PdfWriter writer = new PdfWriter(tempFilePath))
+                            {
+                                using (PdfDocument singlePagePdf = new PdfDocument(writer))
+                                {
+                                    pdfDoc.CopyPagesTo(i, i, singlePagePdf);
+                                }
+                            }
+
+                            string invoiceNo = ExtractInvoiceNumber(tempFilePath);
+                            if (!string.IsNullOrEmpty(invoiceNo))
+                            {
+                                string baseFileName = Path.Combine(outputFolder, $"{invoiceNo}.pdf");
+
+                                string uniqueFileName = baseFileName;
+
+                                int counter = 1;
+                                if (File.Exists(uniqueFileName))
+                                {
+                                    uniqueFileName = Path.Combine(outputFolder, $"{invoiceNo}_{counter}.pdf");
+
+                                    while (File.Exists(uniqueFileName))
+                                    {
+                                        counter++;
+                                        uniqueFileName = Path.Combine(outputFolder, $"{invoiceNo}_{counter}.pdf");
+                                    }
+                                }
+
+                                File.Move(tempFilePath, uniqueFileName);
+                             //   Console.WriteLine($"File saved as: {uniqueFileName}");
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+              //  Console.WriteLine($"Error processing file {filePath}: {ex.Message}");
+            }
+        }
+
+        private string ExtractInvoiceNumber(string filePath)
+        {
+            using (PdfReader reader = new PdfReader(filePath))
+            {
+                using (PdfDocument pdfDoc = new PdfDocument(reader))
+                {
+                    string text = PdfTextExtractor.GetTextFromPage(pdfDoc.GetFirstPage());
+
+                    Regex regex = new Regex(@"Invoice No:\s*(\d+)");
+                    Match match = regex.Match(text);
+                    if (match.Success)
+                    {
+                        return match.Groups[1].Value;
+                    }
+                }
+            }
+            return null;
+        }
+    }
+}
+```
+
+### Key Changes:
+1. **Location of `.exe` File**: The path to the input and output folders is now based on the directory where the executable (`.exe`) file resides:
+   ```csharp
+   string exeDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+   ```
+
+2. **Folder Creation**: The `inputFolder` and `outputFolder` paths are defined relative to the `.exe` directory.
+
+With these changes, the application will create and process files from the `Inputfolder` and `Outputfolder` in the same directory as the `.exe` file, whether it’s on a local system or in a shared folder.
