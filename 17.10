@@ -1,0 +1,9 @@
+  //// Skip the first 9749 rows
+  for (int i = 0; i < 9749; i++)
+  {
+      reader.ReadLine(); // Read and discard each line
+  }
+ 
+whenever using skip the first 9749 rows code its not get into  while (!reader.EndOfStream) this while loop
+that it should get into 
+if it will not get into loop we will not able to create new output file as per new input file and it will not insert into dataase table.
