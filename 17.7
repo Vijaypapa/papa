@@ -1,0 +1,80 @@
+To skip the first 9749 rows in a CSV file, you'll need to adjust the reading logic to ignore these rows. This can be done when reading the file before processing any data.
+
+Here's how you can implement this in your methods:
+
+### 1. Modify `InsertIntoDatabase` Method to Skip Rows
+
+You can modify the `InsertIntoDatabase` method to skip the first 9749 rows of the CSV file before starting to process the data.
+
+#### Example:
+
+```csharp
+public void InsertIntoDatabase(string csvFilePath)
+{
+    using (var reader = new StreamReader(csvFilePath))
+    {
+        using (var csv = new CsvReader(reader, CultureInfo.InvariantCulture))
+        {
+            // Skip first 9749 rows
+            for (int i = 0; i < 9749; i++)
+            {
+                csv.Read(); // Simply read and skip the rows
+            }
+
+            // Now process the remaining rows
+            var records = csv.GetRecords<YourCsvModel>(); // Map the CSV to your model
+            foreach (var record in records)
+            {
+                // Insert logic for each record in your database
+            }
+        }
+    }
+}
+```
+
+### 2. Modify `ProcessFile` to Ensure It Also Skips the Rows
+
+If you're processing files individually, ensure that the `ProcessFile` method reflects the row-skipping behavior before passing the file to the database.
+
+#### Example:
+
+```csharp
+public void ProcessFile(FileInfo file)
+{
+    if (file.Extension == ".csv")
+    {
+        InsertIntoDatabase(file.FullName); // Process the CSV file, skipping rows in InsertIntoDatabase
+    }
+    else
+    {
+        Console.WriteLine("File not found or not a CSV file.");
+    }
+}
+```
+
+### 3. Modify `ProcessFiles` (if applicable)
+
+If you're processing a list of files, the `InsertIntoDatabase` function already handles the skipping of rows. However, you may want to ensure that the file is a CSV before passing it.
+
+#### Example:
+
+```csharp
+public void ProcessFiles(List<FileInfo> fileList)
+{
+    foreach (var file in fileList)
+    {
+        if (file.Extension == ".csv")
+        {
+            InsertIntoDatabase(file.FullName); // Process only CSV files, skipping rows in InsertIntoDatabase
+        }
+        else
+        {
+            Console.WriteLine("Skipping non-CSV file: " + file.Name);
+        }
+    }
+}
+```
+
+### Summary of Changes:
+1. **`InsertIntoDatabase`**: Added logic to skip the first 9749 rows of the CSV.
+2. **`ProcessFile` and `ProcessFiles`**: Call `InsertIntoDatabase` which skips rows, ensuring files are processed correctly.
