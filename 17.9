@@ -1,0 +1,127 @@
+To modify the `InsertIntoDatabase` method to skip the first 9749 rows, you need to add logic to skip these rows before starting the actual data processing. 
+
+Here's how you can adjust the existing `InsertIntoDatabase` method:
+
+### Updated `InsertIntoDatabase` Method
+
+```csharp
+private void InsertIntoDatabase(string csvFilePath)
+{
+    try
+    {
+        if (!File.Exists(csvFilePath))
+        {
+            LogToErrorFile($"File not found: {csvFilePath}");
+            return;
+        }
+
+        using (var connection = new SqlConnection(ConfigurationManager.ConnectionStrings["DefaultConnection"].ConnectionString))
+        {
+            connection.Open();
+
+            int batchId = GenerateNewBatchId(connection);
+
+            string insertQuery = @"
+            INSERT INTO OutputFileDetails (Date, Agent, TimesheetOwner, TotalTalkingTime, Division, CreatedDateTime, BatchId)
+            VALUES (@Date, @Agent, @TimesheetOwner, @TotalTalkingTime, @Division, @CreatedDateTime, @BatchId)";
+
+            using (var insertCommand = new SqlCommand(insertQuery, connection))
+            {
+                using (var reader = new StreamReader(csvFilePath))
+                {
+                    // Skip the first 9749 rows
+                    for (int i = 0; i < 9749; i++)
+                    {
+                        reader.ReadLine(); // Read and discard each line
+                    }
+
+                    // Skip additional 6 rows (if required) or proceed directly to the data rows
+                    for (int i = 0; i < 6; i++)
+                    {
+                        reader.ReadLine();
+                    }
+
+                    reader.ReadLine(); // Read the header row
+
+                    while (!reader.EndOfStream)
+                    {
+                        var line = reader.ReadLine();
+                        var values = line.Split(',');
+
+                        if (values.Length < 8)
+                        {
+                            LogToErrorFile($"Skipping line due to insufficient values: {line}");
+                            continue;
+                        }
+
+                        var agentExtensionWithOwner = values[0].Trim('"');
+                        var timesheetOwner = values[1].Trim('"');
+                        var len = values.Length;
+                        var totalTalkingTime = values[len - 1].Trim();
+
+                        var parts = agentExtensionWithOwner.Split(' ', 2);
+
+                        if (parts.Length < 2)
+                        {
+                            LogToErrorFile($"Skipping line due to invalid agentExtensionWithOwner format: {line}");
+                            continue;
+                        }
+
+                        var agentExtension = parts[0].Trim();
+                        var divisionValue = parts[1].Trim('"');
+
+                        if (!string.IsNullOrEmpty(agentExtension))
+                        {
+                            insertCommand.Parameters.Clear();
+                            insertCommand.Parameters.AddWithValue("@Date", DateTime.Today);
+                            insertCommand.Parameters.AddWithValue("@Agent", agentExtension);
+                            insertCommand.Parameters.AddWithValue("@TimesheetOwner", timesheetOwner);
+                            insertCommand.Parameters.AddWithValue("@TotalTalkingTime", totalTalkingTime);
+                            insertCommand.Parameters.AddWithValue("@Division", divisionValue);
+                            insertCommand.Parameters.AddWithValue("@CreatedDateTime", DateTime.Now);
+                            insertCommand.Parameters.AddWithValue("@BatchId", batchId);
+
+                            insertCommand.ExecuteNonQuery();
+                        }
+                        else
+                        {
+                            LogToErrorFile($"Skipping line due to empty agentExtension or timesheetOwner: {line}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        LogToErrorFile($"General Exception: {ex.Message}");
+        StartConsoleWriting(ex.Message);
+    }
+}
+```
+
+### Explanation:
+1. **Skip Rows:** The `for` loop `for (int i = 0; i < 9749; i++)` is added to read and discard the first 9749 rows from the CSV file before processing starts.
+2. **Additional Rows:** If there are specific rows you need to skip beyond the 9749 rows (e.g., header rows or specific line formats), adjust the skipping logic accordingly.
+
+### Ensure the `ProcessFile` Method Reflects the Update
+
+If `ProcessFile` is responsible for calling `InsertIntoDatabase`, no additional changes are needed beyond calling the updated method.
+
+#### Example:
+
+```csharp
+public void ProcessFile(FileInfo file)
+{
+    if (file.Extension == ".csv")
+    {
+        InsertIntoDatabase(file.FullName); // Now processes CSV with row skipping
+    }
+    else
+    {
+        Console.WriteLine("File not found or not a CSV file.");
+    }
+}
+```
+
+With these updates, the method will now properly skip the first 9749 rows of the CSV file before processing the remaining data.
