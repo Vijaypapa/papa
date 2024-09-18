@@ -1,0 +1,127 @@
+To adjust your `InsertIntoDatabase` method so that it only inserts new rows starting from row 9750, you can modify the logic to fetch the data from the database first, then compare it with the new rows in the file. This way, only the new rows (starting from 9750) will be inserted.
+
+Here’s how you can modify your method to achieve this:
+
+### Updated `InsertIntoDatabase` Method
+
+```csharp
+private void InsertIntoDatabase(string csvFilePath)
+{
+    try
+    {
+        if (!File.Exists(csvFilePath))
+        {
+            LogToErrorFile($"File not found: {csvFilePath}");
+            return;
+        }
+
+        using (var connection = new SqlConnection(ConfigurationManager.ConnectionStrings["DefaultConnection"].ConnectionString))
+        {
+            connection.Open();
+
+            // Get the current maximum BatchId from the database
+            int batchId = GenerateNewBatchId(connection);
+
+            // Query to get the current max row count from the database
+            string queryToGetMaxRow = "SELECT COUNT(*) FROM OutputFileDetails";
+            int currentRowCount = 0;
+
+            using (var cmd = new SqlCommand(queryToGetMaxRow, connection))
+            {
+                currentRowCount = (int)cmd.ExecuteScalar();
+            }
+
+            // Skip if already 9749 rows exist
+            if (currentRowCount >= 9749)
+            {
+                string insertQuery = @"
+                    INSERT INTO OutputFileDetails (Date, Agent, TimesheetOwner, TotalTalkingTime, Division, CreatedDateTime, BatchId)
+                    VALUES (@Date, @Agent, @TimesheetOwner, @TotalTalkingTime, @Division, @CreatedDateTime, @BatchId)";
+
+                using (var insertCommand = new SqlCommand(insertQuery, connection))
+                {
+                    using (var reader = new StreamReader(csvFilePath))
+                    {
+                        // Skip the first 6 header lines if necessary
+                        for (int i = 0; i < 6; i++)
+                        {
+                            reader.ReadLine();
+                        }
+
+                        int rowIndex = 0;
+
+                        while (!reader.EndOfStream)
+                        {
+                            rowIndex++;
+
+                            // Skip rows until the 9750th
+                            if (rowIndex <= 9749)
+                            {
+                                reader.ReadLine();
+                                continue;
+                            }
+
+                            var line = reader.ReadLine();
+                            var values = line.Split(',');
+
+                            if (values.Length < 8)
+                            {
+                                LogToErrorFile($"Skipping line due to insufficient values: {line}");
+                                continue;
+                            }
+
+                            var agentExtensionWithOwner = values[0].Trim('"');
+                            var timesheetOwner = values[1].Trim('"');
+                            var totalTalkingTime = values[values.Length - 1].Trim();
+
+                            var parts = agentExtensionWithOwner.Split(' ', 2);
+                            if (parts.Length < 2)
+                            {
+                                LogToErrorFile($"Skipping line due to invalid agentExtensionWithOwner format: {line}");
+                                continue;
+                            }
+
+                            var agentExtension = parts[0].Trim();
+                            var divisionValue = parts[1].Trim('"');
+
+                            if (!string.IsNullOrEmpty(agentExtension))
+                            {
+                                insertCommand.Parameters.Clear();
+                                insertCommand.Parameters.AddWithValue("@Date", DateTime.Today);
+                                insertCommand.Parameters.AddWithValue("@Agent", agentExtension);
+                                insertCommand.Parameters.AddWithValue("@TimesheetOwner", timesheetOwner);
+                                insertCommand.Parameters.AddWithValue("@TotalTalkingTime", totalTalkingTime);
+                                insertCommand.Parameters.AddWithValue("@Division", divisionValue);
+                                insertCommand.Parameters.AddWithValue("@CreatedDateTime", DateTime.Now);
+                                insertCommand.Parameters.AddWithValue("@BatchId", batchId);
+
+                                insertCommand.ExecuteNonQuery();
+                            }
+                            else
+                            {
+                                LogToErrorFile($"Skipping line due to empty agentExtension or timesheetOwner: {line}");
+                            }
+                        }
+                    }
+                }
+            }
+            else
+            {
+                LogToErrorFile("Database already contains more than or equal to 9749 rows.");
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        LogToErrorFile($"General Exception: {ex.Message}");
+        StartConsoleWriting(ex.Message);
+    }
+}
+```
+
+### Key Adjustments:
+1. **Row skipping logic:** The first 9749 rows are skipped in the CSV file before processing any data.
+2. **Database check:** The current row count in the `OutputFileDetails` table is checked before inserting new data. If there are already 9749 or more rows in the database, the method proceeds to insert only the new rows from the file.
+3. **Inserting new data:** Starting from row 9750, the new data is read and inserted into the database.
+
+Let me know if you need further adjustments!
