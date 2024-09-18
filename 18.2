@@ -1,0 +1,115 @@
+To handle skipping the first 9749 rows for the Salesforce folder and only inserting new data starting from the 9750th row in the `InsertIntoDatabase` method, you can add logic to skip the first 9749 rows when processing the file. Here's how you can modify your `InsertIntoDatabase` method to achieve this:
+
+1. Add a condition to check if the file being processed is from the Salesforce folder.
+2. Skip the first 9749 rows and then insert the remaining data.
+
+Here's an updated version of the `InsertIntoDatabase` method:
+
+```csharp
+private void InsertIntoDatabase(string csvFilePath)
+{
+    try
+    {
+        if (!File.Exists(csvFilePath))
+        {
+            LogToErrorFile($"File not found: {csvFilePath}");
+            return;
+        }
+
+        using (var connection = new SqlConnection(ConfigurationManager.ConnectionStrings["DefaultConnection"].ConnectionString))
+        {
+            connection.Open();
+
+            int batchId = GenerateNewBatchId(connection);
+
+            string insertQuery = @"
+            INSERT INTO OutputFileDetails (Date, Agent, TimesheetOwner, TotalTalkingTime, Division, CreatedDateTime, BatchId)
+            VALUES (@Date, @Agent, @TimesheetOwner, @TotalTalkingTime, @Division, @CreatedDateTime, @BatchId)";
+
+            using (var insertCommand = new SqlCommand(insertQuery, connection))
+            {
+                using (var reader = new StreamReader(csvFilePath))
+                {
+                    // Skip the header lines (if any), then the first 9749 rows for Salesforce folder files.
+                    int skipRows = 9749;
+                    string salesforceFolderPath = Path.Combine(baseDirectory, "SalesforceFolder");
+
+                    // Skip the first 6 lines if there are any headers
+                    for (int i = 0; i < 6; i++)
+                    {
+                        reader.ReadLine();
+                    }
+
+                    // Check if this file is from the Salesforce folder and skip the first 9749 rows
+                    if (csvFilePath.StartsWith(salesforceFolderPath, StringComparison.InvariantCultureIgnoreCase))
+                    {
+                        for (int i = 0; i < skipRows; i++)
+                        {
+                            reader.ReadLine();
+                        }
+                    }
+
+                    // Process the remaining data after skipping rows
+                    while (!reader.EndOfStream)
+                    {
+                        var line = reader.ReadLine();
+                        var values = line.Split(',');
+
+                        if (values.Length < 8)
+                        {
+                            LogToErrorFile($"Skipping line due to insufficient values: {line}");
+                            continue;
+                        }
+
+                        var agentExtensionWithOwner = values[0].Trim('"');
+                        var timesheetOwner = values[1].Trim('"');
+                        var len = values.Length;
+                        var totalTalkingTime = values[len - 1].Trim();
+
+                        var parts = agentExtensionWithOwner.Split(' ', 2);
+
+                        if (parts.Length < 2)
+                        {
+                            LogToErrorFile($"Skipping line due to invalid agentExtensionWithOwner format: {line}");
+                            continue;
+                        }
+
+                        var agentExtension = parts[0].Trim();
+                        var divisionValue = parts[1].Trim('"');
+
+                        if (!string.IsNullOrEmpty(agentExtension))
+                        {
+                            insertCommand.Parameters.Clear();
+                            insertCommand.Parameters.AddWithValue("@Date", DateTime.Today);
+                            insertCommand.Parameters.AddWithValue("@Agent", agentExtension);
+                            insertCommand.Parameters.AddWithValue("@TimesheetOwner", timesheetOwner);
+                            insertCommand.Parameters.AddWithValue("@TotalTalkingTime", totalTalkingTime);
+                            insertCommand.Parameters.AddWithValue("@Division", divisionValue);
+                            insertCommand.Parameters.AddWithValue("@CreatedDateTime", DateTime.Now);
+                            insertCommand.Parameters.AddWithValue("@BatchId", batchId);
+
+                            insertCommand.ExecuteNonQuery();
+                        }
+                        else
+                        {
+                            LogToErrorFile($"Skipping line due to empty agentExtension or timesheetOwner: {line}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        LogToErrorFile($"General Exception: {ex.Message}");
+        StartConsoleWriting(ex.Message);
+    }
+}
+```
+
+### Key Changes:
+- Added logic to check if the file is from the Salesforce folder.
+- Skipped the first 9749 rows using a loop if the file is from the Salesforce folder.
+- The remaining logic for inserting the data stays the same after the rows are skipped.
+
+This will ensure that the first 9749 rows are skipped for Salesforce files, and new data is inserted starting from row 9750.
