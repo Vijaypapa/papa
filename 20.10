@@ -1,0 +1,211 @@
+To handle the exception caused by trying to move a file to a folder where a file with the same name already exists, we need to modify the `File.Move` call to check if a file with the same name already exists in the destination folder. If it does, we append `_1`, `_2`, and so on, to the filename before moving it.
+
+Here’s how you can implement it:
+
+```csharp
+using System;
+using System.IO;
+using System.Linq;
+using iText.Kernel.Pdf;
+using iText.Kernel.Utils;
+using System.Text.RegularExpressions;
+using iText.Kernel.Pdf.Canvas.Parser;
+using System.Reflection;
+using System.IO.Compression;
+using NPOI.SS.UserModel;
+using NPOI.XSSF.UserModel;
+using System.Collections.Generic;
+
+namespace PDFSplit
+{
+    public class FileProcessor
+    {
+        public void ProcessFiles()
+        {
+            string exeDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+
+            string inputFolder = Path.Combine(exeDirectory, "Inputfolder");
+            string outputFolder = Path.Combine(exeDirectory, "Outputfolder");
+            string originalFileFolder = Path.Combine(exeDirectory, "OriginalFileFolder");
+
+            EnsureFolderExists(inputFolder);
+            EnsureFolderExists(outputFolder);
+            EnsureFolderExists(originalFileFolder);
+
+            string excelFilePath = Path.Combine(inputFolder, "Inputinvoice.xlsx");
+
+            // Read invoice numbers from Inputinvoice.xlsx
+            var invoiceNumbers = ReadInvoiceNumbers(excelFilePath);
+
+            // Process PDF files and move them to the OriginalFileFolder with unique names
+            var files = Directory.GetFiles(inputFolder, "*.pdf");
+            foreach (var file in files)
+            {
+                ProcessFile(file, outputFolder);
+                MoveFileWithUniqueName(file, originalFileFolder);
+            }
+
+            // Create ZIP file
+            string zipFileName = Path.Combine(outputFolder, $"BBK invoices – {DateTime.Now:yyyy-MM-dd}.zip");
+            using (ZipArchive zip = ZipFile.Open(zipFileName, ZipArchiveMode.Create))
+            {
+                foreach (var invoiceNo in invoiceNumbers)
+                {
+                    string matchingFile = Path.Combine(outputFolder, $"{invoiceNo}.pdf");
+                    if (File.Exists(matchingFile))
+                    {
+                        zip.CreateEntryFromFile(matchingFile, Path.GetFileName(matchingFile));
+                    }
+                }
+            }
+
+            // Move Inputinvoice.xlsx to OriginalFileFolder after execution
+            MoveFileWithUniqueName(excelFilePath, originalFileFolder);
+        }
+
+        private void EnsureFolderExists(string folderPath)
+        {
+            if (!Directory.Exists(folderPath))
+            {
+                Directory.CreateDirectory(folderPath);
+            }
+        }
+
+        private void ProcessFile(string filePath, string outputFolder)
+        {
+            try
+            {
+                using (PdfReader reader = new PdfReader(filePath))
+                {
+                    using (PdfDocument pdfDoc = new PdfDocument(reader))
+                    {
+                        for (int i = 1; i <= pdfDoc.GetNumberOfPages(); i++)
+                        {
+                            string tempFilePath = Path.Combine(outputFolder, $"tempPage_{i}.pdf");
+                            using (PdfWriter writer = new PdfWriter(tempFilePath))
+                            {
+                                using (PdfDocument singlePagePdf = new PdfDocument(writer))
+                                {
+                                    pdfDoc.CopyPagesTo(i, i, singlePagePdf);
+                                }
+                            }
+
+                            string invoiceNo = ExtractInvoiceNumber(tempFilePath);
+                            if (!string.IsNullOrEmpty(invoiceNo))
+                            {
+                                string baseFileName = Path.Combine(outputFolder, $"{invoiceNo}.pdf");
+
+                                string uniqueFileName = baseFileName;
+                                int counter = 1;
+                                while (File.Exists(uniqueFileName))
+                                {
+                                    uniqueFileName = Path.Combine(outputFolder, $"{invoiceNo}_{counter}.pdf");
+                                    counter++;
+                                }
+
+                                File.Move(tempFilePath, uniqueFileName);
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error processing file {filePath}: {ex.Message}");
+            }
+        }
+
+        private string ExtractInvoiceNumber(string filePath)
+        {
+            using (PdfReader reader = new PdfReader(filePath))
+            {
+                using (PdfDocument pdfDoc = new PdfDocument(reader))
+                {
+                    string text = PdfTextExtractor.GetTextFromPage(pdfDoc.GetFirstPage());
+
+                    Regex regex = new Regex(@"Invoice No:\s*(\d+)");
+                    Match match = regex.Match(text);
+                    if (match.Success)
+                    {
+                        return match.Groups[1].Value;
+                    }
+                }
+            }
+            return null;
+        }
+
+        private List<string> ReadInvoiceNumbers(string excelFilePath)
+        {
+            List<string> invoiceNumbers = new List<string>();
+
+            using (FileStream fs = new FileStream(excelFilePath, FileMode.Open, FileAccess.Read))
+            {
+                IWorkbook workbook = new XSSFWorkbook(fs);
+                ISheet sheet = workbook.GetSheetAt(0);
+
+                for (int row = 1; row <= sheet.LastRowNum; row++)
+                {
+                    IRow currentRow = sheet.GetRow(row);
+                    if (currentRow != null && currentRow.GetCell(0) != null)
+                    {
+                        string invoiceNo = currentRow.GetCell(0).ToString();
+                        if (!string.IsNullOrEmpty(invoiceNo))
+                        {
+                            invoiceNumbers.Add(invoiceNo.Trim());
+                        }
+                    }
+                }
+            }
+
+            return invoiceNumbers;
+        }
+
+        private void MoveFileWithUniqueName(string filePath, string destinationFolder)
+        {
+            string fileName = Path.GetFileNameWithoutExtension(filePath);
+            string extension = Path.GetExtension(filePath);
+            string destinationPath = Path.Combine(destinationFolder, fileName + extension);
+
+            int counter = 1;
+            while (File.Exists(destinationPath))
+            {
+                destinationPath = Path.Combine(destinationFolder, $"{fileName}_{counter}{extension}");
+                counter++;
+            }
+
+            File.Move(filePath, destinationPath);
+        }
+    }
+}
+```
+
+### Key Changes:
+1. **`MoveFileWithUniqueName` Method**:
+   This method checks if a file with the same name exists in the `OriginalFileFolder`. If it does, it appends `_1`, `_2`, etc., to the filename until a unique name is found.
+
+   ```csharp
+   private void MoveFileWithUniqueName(string filePath, string destinationFolder)
+   {
+       string fileName = Path.GetFileNameWithoutExtension(filePath);
+       string extension = Path.GetExtension(filePath);
+       string destinationPath = Path.Combine(destinationFolder, fileName + extension);
+
+       int counter = 1;
+       while (File.Exists(destinationPath))
+       {
+           destinationPath = Path.Combine(destinationFolder, $"{fileName}_{counter}{extension}");
+           counter++;
+       }
+
+       File.Move(filePath, destinationPath);
+   }
+   ```
+
+2. **Handling File Move**:
+   The `MoveFileWithUniqueName` method is used in the `ProcessFiles` method when moving files from the `Inputfolder` to the `OriginalFileFolder`. This ensures that if a file with the same name already exists, it will not throw an exception but instead, the file will be renamed with an incremented counter.
+
+   ```csharp
+   MoveFileWithUniqueName(file, originalFileFolder);
+   ```
+
+This will now handle cases where the same file name already exists in the `OriginalFileFolder` by appending `_1`, `_2`, etc., to the filenames, avoiding the `IOException`.
