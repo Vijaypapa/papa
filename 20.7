@@ -1,0 +1,165 @@
+Here’s an updated code using the NPOI library to read the `Inputinvoice.xlsx` file and match the invoice numbers from the Excel file with the generated PDF files, zipping only the matching PDF files into the `BBK invoices – Current Date` zip file.
+
+```csharp
+using System;
+using System.IO;
+using System.Linq;
+using iText.Kernel.Pdf;
+using iText.Kernel.Utils;
+using System.Text.RegularExpressions;
+using iText.Kernel.Pdf.Canvas.Parser;
+using System.Reflection;
+using System.IO.Compression;
+using NPOI.SS.UserModel;
+using NPOI.XSSF.UserModel;
+using System.Collections.Generic;
+
+namespace PDFSplit
+{
+    public class FileProcessor
+    {
+        public void ProcessFiles()
+        {
+            string exeDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+
+            string inputFolder = Path.Combine(exeDirectory, "Inputfolder");
+            string outputFolder = Path.Combine(exeDirectory, "Outputfolder");
+            string originalFileFolder = Path.Combine(exeDirectory, "OriginalFileFolder");
+
+            EnsureFolderExists(inputFolder);
+            EnsureFolderExists(outputFolder);
+            EnsureFolderExists(originalFileFolder);
+
+            // Read invoice numbers from Inputinvoice.xlsx
+            var invoiceNumbers = ReadInvoiceNumbers(Path.Combine(inputFolder, "Inputinvoice.xlsx"));
+
+            // Process PDF files and move Input files to OriginalFileFolder
+            var files = Directory.GetFiles(inputFolder, "*.pdf");
+            foreach (var file in files)
+            {
+                ProcessFile(file, outputFolder);
+                File.Move(file, Path.Combine(originalFileFolder, Path.GetFileName(file)));
+            }
+
+            // Create ZIP file
+            string zipFileName = Path.Combine(outputFolder, $"BBK invoices – {DateTime.Now:yyyy-MM-dd}.zip");
+            using (ZipArchive zip = ZipFile.Open(zipFileName, ZipArchiveMode.Create))
+            {
+                foreach (var invoiceNo in invoiceNumbers)
+                {
+                    string matchingFile = Path.Combine(outputFolder, $"{invoiceNo}.pdf");
+                    if (File.Exists(matchingFile))
+                    {
+                        zip.CreateEntryFromFile(matchingFile, Path.GetFileName(matchingFile));
+                    }
+                }
+            }
+        }
+
+        private void EnsureFolderExists(string folderPath)
+        {
+            if (!Directory.Exists(folderPath))
+            {
+                Directory.CreateDirectory(folderPath);
+            }
+        }
+
+        private void ProcessFile(string filePath, string outputFolder)
+        {
+            try
+            {
+                using (PdfReader reader = new PdfReader(filePath))
+                {
+                    using (PdfDocument pdfDoc = new PdfDocument(reader))
+                    {
+                        for (int i = 1; i <= pdfDoc.GetNumberOfPages(); i++)
+                        {
+                            string tempFilePath = Path.Combine(outputFolder, $"tempPage_{i}.pdf");
+                            using (PdfWriter writer = new PdfWriter(tempFilePath))
+                            {
+                                using (PdfDocument singlePagePdf = new PdfDocument(writer))
+                                {
+                                    pdfDoc.CopyPagesTo(i, i, singlePagePdf);
+                                }
+                            }
+
+                            string invoiceNo = ExtractInvoiceNumber(tempFilePath);
+                            if (!string.IsNullOrEmpty(invoiceNo))
+                            {
+                                string baseFileName = Path.Combine(outputFolder, $"{invoiceNo}.pdf");
+
+                                string uniqueFileName = baseFileName;
+                                int counter = 1;
+                                while (File.Exists(uniqueFileName))
+                                {
+                                    uniqueFileName = Path.Combine(outputFolder, $"{invoiceNo}_{counter}.pdf");
+                                    counter++;
+                                }
+
+                                File.Move(tempFilePath, uniqueFileName);
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error processing file {filePath}: {ex.Message}");
+            }
+        }
+
+        private string ExtractInvoiceNumber(string filePath)
+        {
+            using (PdfReader reader = new PdfReader(filePath))
+            {
+                using (PdfDocument pdfDoc = new PdfDocument(reader))
+                {
+                    string text = PdfTextExtractor.GetTextFromPage(pdfDoc.GetFirstPage());
+
+                    Regex regex = new Regex(@"Invoice No:\s*(\d+)");
+                    Match match = regex.Match(text);
+                    if (match.Success)
+                    {
+                        return match.Groups[1].Value;
+                    }
+                }
+            }
+            return null;
+        }
+
+        private List<string> ReadInvoiceNumbers(string excelFilePath)
+        {
+            List<string> invoiceNumbers = new List<string>();
+
+            using (FileStream fs = new FileStream(excelFilePath, FileMode.Open, FileAccess.Read))
+            {
+                IWorkbook workbook = new XSSFWorkbook(fs);
+                ISheet sheet = workbook.GetSheetAt(0);
+
+                for (int row = 1; row <= sheet.LastRowNum; row++)
+                {
+                    IRow currentRow = sheet.GetRow(row);
+                    if (currentRow != null && currentRow.GetCell(0) != null)
+                    {
+                        string invoiceNo = currentRow.GetCell(0).ToString();
+                        if (!string.IsNullOrEmpty(invoiceNo))
+                        {
+                            invoiceNumbers.Add(invoiceNo.Trim());
+                        }
+                    }
+                }
+            }
+
+            return invoiceNumbers;
+        }
+    }
+}
+```
+
+### Key Changes:
+1. **Reading Excel with NPOI**: The `ReadInvoiceNumbers` method reads the `Inputinvoice.xlsx` file using NPOI to extract invoice numbers.
+2. **PDF Splitting**: The PDF splitting logic remains the same, extracting `Invoice No:` and naming the output PDFs accordingly.
+3. **Zip File Creation**: Only PDFs matching the invoice numbers from the Excel file are added to the zip file named `BBK invoices – Current Date.zip`.
+4. **Moving Files**: After processing, input files are moved from the `Inputfolder` to the `OriginalFileFolder`.
+
+This solution meets the requirement of handling Excel files with NPOI and selectively zipping only the matched PDF files.
