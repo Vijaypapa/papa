@@ -1,0 +1,113 @@
+To keep only the data for the maximum batch ID of the current day and remove previous batch ID data for that day in the `OutputFileDetails` table, you can update your `InsertIntoDatabase` method by deleting the older records after inserting the new data. Here's how you can modify your method:
+
+1. After generating the new `batchId`, delete the older records with lower batch IDs for the same day.
+2. Ensure that only data from the maximum `BatchId` is retained for the current day.
+
+Here’s the updated code for `InsertIntoDatabase`:
+
+```csharp
+private void InsertIntoDatabase(string csvFilePath)
+{
+    try
+    {
+        if (!File.Exists(csvFilePath))
+        {
+            LogToErrorFile($"File not found: {csvFilePath}");
+            return;
+        }
+
+        using (var connection = new SqlConnection(ConfigurationManager.ConnectionStrings["DefaultConnection"].ConnectionString))
+        {
+            connection.Open();
+
+            int batchId = GenerateNewBatchId(connection);
+
+            string insertQuery = @"
+            INSERT INTO OutputFileDetails (Date, Agent, TimesheetOwner, TotalTalkingTime, Division, CreatedDateTime, BatchId)
+            VALUES (@Date, @Agent, @TimesheetOwner, @TotalTalkingTime, @Division, @CreatedDateTime, @BatchId)";
+
+            using (var insertCommand = new SqlCommand(insertQuery, connection))
+            {
+                using (var reader = new StreamReader(csvFilePath))
+                {
+                    for (int i = 0; i < 6; i++)
+                    {
+                        reader.ReadLine();
+                    }
+
+                    reader.ReadLine();
+
+                    while (!reader.EndOfStream)
+                    {
+                        var line = reader.ReadLine();
+                        var values = line.Split(',');
+
+                        if (values.Length < 8)
+                        {
+                            LogToErrorFile($"Skipping line due to insufficient values: {line}");
+                            continue;
+                        }
+
+                        var agentExtensionWithOwner = values[0].Trim('"');
+                        var timesheetOwner = values[1].Trim('"');
+                        var len = values.Length;
+                        var totalTalkingTime = values[len - 1].Trim();
+
+                        var parts = agentExtensionWithOwner.Split(' ', 2);
+
+                        if (parts.Length < 2)
+                        {
+                            LogToErrorFile($"Skipping line due to invalid agentExtensionWithOwner format: {line}");
+                            continue;
+                        }
+
+                        var agentExtension = parts[0].Trim();
+                        var divisionValue = parts[1].Trim('"');
+
+                        if (!string.IsNullOrEmpty(agentExtension))
+                        {
+                            insertCommand.Parameters.Clear();
+                            insertCommand.Parameters.AddWithValue("@Date", DateTime.Today);
+                            insertCommand.Parameters.AddWithValue("@Agent", agentExtension);
+                            insertCommand.Parameters.AddWithValue("@TimesheetOwner", timesheetOwner);
+                            insertCommand.Parameters.AddWithValue("@TotalTalkingTime", totalTalkingTime);
+                            insertCommand.Parameters.AddWithValue("@Division", divisionValue);
+                            insertCommand.Parameters.AddWithValue("@CreatedDateTime", DateTime.Now);
+                            insertCommand.Parameters.AddWithValue("@BatchId", batchId);
+
+                            insertCommand.ExecuteNonQuery();
+                        }
+                        else
+                        {
+                            LogToErrorFile($"Skipping line due to empty agentExtension or timesheetOwner: {line}");
+                        }
+                    }
+                }
+            }
+
+            // Delete older data from the same day with lower BatchId
+            string deleteQuery = @"
+                DELETE FROM OutputFileDetails
+                WHERE BatchId < @BatchId
+                AND CAST(CreatedDateTime AS DATE) = CAST(GETDATE() AS DATE)";
+
+            using (var deleteCommand = new SqlCommand(deleteQuery, connection))
+            {
+                deleteCommand.Parameters.AddWithValue("@BatchId", batchId);
+                deleteCommand.ExecuteNonQuery();
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        LogToErrorFile($"General Exception: {ex.Message}");
+        StartConsoleWriting(ex.Message);
+    }
+}
+```
+
+### Key Changes:
+1. **`deleteQuery`:** This query deletes records from the `OutputFileDetails` table where the `BatchId` is less than the current `batchId` and the `CreatedDateTime` falls on the current day.
+2. **Execution Flow:** After inserting new records, it immediately removes old records with a lower `BatchId` for the same day to retain only the most recent data.
+
+This ensures that your table keeps only the records with the maximum `BatchId` for the current day.
