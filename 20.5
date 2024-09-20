@@ -1,0 +1,214 @@
+To fulfill the requirements of processing the Excel file, splitting the PDF based on the invoice numbers, moving files between folders, and zipping the result, here's how you can modify the existing `FileProcessor` class:
+
+### Key Steps:
+1. **Create the `OriginalFileFolder`**: After processing, move files from the `Inputfolder` to the `OriginalFileFolder`.
+2. **Read the Excel file `Inputinvoice.xlsx`**: Parse the Excel file to get a list of invoice numbers.
+3. **Split PDF files based on invoice numbers**: Use the extracted invoice numbers to split the PDF and name the files accordingly.
+4. **Create a ZIP file**: Name the ZIP file `BBK Invoices - Current Date` and include the split PDF files.
+
+### Modified Code:
+Here is the updated version of your code:
+
+```csharp
+using System;
+using System.IO;
+using System.Linq;
+using iText.Kernel.Pdf;
+using iText.Kernel.Utils;
+using System.Text.RegularExpressions;
+using iText.Kernel.Pdf.Canvas.Parser;
+using System.Reflection;
+using System.IO.Compression;
+using OfficeOpenXml; // Make sure you have the EPPlus NuGet package installed
+
+namespace PDFSplit
+{
+    public class FileProcessor
+    {
+        public void ProcessFiles()
+        {
+            string exeDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+
+            string inputFolder = Path.Combine(exeDirectory, "Inputfolder");
+            string outputFolder = Path.Combine(exeDirectory, "Outputfolder");
+            string originalFolder = Path.Combine(exeDirectory, "OriginalFileFolder");
+
+            EnsureFolderExists(inputFolder);
+            EnsureFolderExists(outputFolder);
+            EnsureFolderExists(originalFolder);
+
+            // Load invoice numbers from the Excel file
+            var invoiceNumbers = ReadInvoiceNumbers(Path.Combine(inputFolder, "Inputinvoice.xlsx"));
+
+            var files = Directory.GetFiles(inputFolder, "*.pdf");
+            foreach (var file in files)
+            {
+                ProcessFile(file, outputFolder, invoiceNumbers);
+            }
+
+            // Create ZIP file with output PDF files
+            CreateZipFile(outputFolder);
+
+            // Move original files to OriginalFileFolder
+            MoveFilesToOriginalFolder(inputFolder, originalFolder);
+        }
+
+        private void EnsureFolderExists(string folderPath)
+        {
+            if (!Directory.Exists(folderPath))
+            {
+                Directory.CreateDirectory(folderPath);
+            }
+        }
+
+        private void ProcessFile(string filePath, string outputFolder, string[] invoiceNumbers)
+        {
+            try
+            {
+                using (PdfReader reader = new PdfReader(filePath))
+                {
+                    using (PdfDocument pdfDoc = new PdfDocument(reader))
+                    {
+                        for (int i = 1; i <= pdfDoc.GetNumberOfPages(); i++)
+                        {
+                            string tempFilePath = Path.Combine(outputFolder, $"tempPage_{i}.pdf");
+                            using (PdfWriter writer = new PdfWriter(tempFilePath))
+                            {
+                                using (PdfDocument singlePagePdf = new PdfDocument(writer))
+                                {
+                                    pdfDoc.CopyPagesTo(i, i, singlePagePdf);
+                                }
+                            }
+
+                            string invoiceNo = ExtractInvoiceNumber(tempFilePath);
+                            if (!string.IsNullOrEmpty(invoiceNo) && invoiceNumbers.Contains(invoiceNo))
+                            {
+                                string baseFileName = Path.Combine(outputFolder, $"{invoiceNo}.pdf");
+                                string uniqueFileName = baseFileName;
+                                int counter = 1;
+
+                                while (File.Exists(uniqueFileName))
+                                {
+                                    uniqueFileName = Path.Combine(outputFolder, $"{invoiceNo}_{counter}.pdf");
+                                    counter++;
+                                }
+
+                                File.Move(tempFilePath, uniqueFileName);
+                            }
+                            else
+                            {
+                                File.Delete(tempFilePath); // Remove temp file if no valid invoice number found
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // Handle errors
+            }
+        }
+
+        private string ExtractInvoiceNumber(string filePath)
+        {
+            using (PdfReader reader = new PdfReader(filePath))
+            {
+                using (PdfDocument pdfDoc = new PdfDocument(reader))
+                {
+                    string text = PdfTextExtractor.GetTextFromPage(pdfDoc.GetFirstPage());
+
+                    Regex regex = new Regex(@"Invoice No:\s*(\d+)");
+                    Match match = regex.Match(text);
+                    if (match.Success)
+                    {
+                        return match.Groups[1].Value;
+                    }
+                }
+            }
+            return null;
+        }
+
+        private string[] ReadInvoiceNumbers(string excelFilePath)
+        {
+            if (!File.Exists(excelFilePath))
+            {
+                throw new FileNotFoundException($"Excel file not found: {excelFilePath}");
+            }
+
+            var invoiceNumbers = new List<string>();
+            using (var package = new ExcelPackage(new FileInfo(excelFilePath)))
+            {
+                ExcelWorksheet worksheet = package.Workbook.Worksheets.FirstOrDefault();
+                if (worksheet != null)
+                {
+                    int rows = worksheet.Dimension.Rows;
+                    for (int i = 2; i <= rows; i++) // Assuming the first row is the header
+                    {
+                        var invoiceNo = worksheet.Cells[i, 1].Text; // Reading invoice numbers from the first column
+                        if (!string.IsNullOrEmpty(invoiceNo))
+                        {
+                            invoiceNumbers.Add(invoiceNo.Trim());
+                        }
+                    }
+                }
+            }
+
+            return invoiceNumbers.ToArray();
+        }
+
+        private void CreateZipFile(string outputFolder)
+        {
+            string zipFileName = $"BBK Invoices - {DateTime.Now:yyyy-MM-dd}.zip";
+            string zipFilePath = Path.Combine(outputFolder, zipFileName);
+
+            if (File.Exists(zipFilePath))
+            {
+                File.Delete(zipFilePath);
+            }
+
+            ZipFile.CreateFromDirectory(outputFolder, zipFilePath);
+        }
+
+        private void MoveFilesToOriginalFolder(string inputFolder, string originalFolder)
+        {
+            var files = Directory.GetFiles(inputFolder);
+            foreach (var file in files)
+            {
+                string destFileName = Path.Combine(originalFolder, Path.GetFileName(file));
+                if (File.Exists(destFileName))
+                {
+                    File.Delete(destFileName);
+                }
+                File.Move(file, destFileName);
+            }
+        }
+    }
+}
+```
+
+### Key Changes:
+
+1. **Move Files to `OriginalFileFolder`:**
+   - The `MoveFilesToOriginalFolder` method moves all files from the `Inputfolder` to the `OriginalFileFolder` after processing.
+
+2. **Read Excel File for Invoice Numbers:**
+   - The `ReadInvoiceNumbers` method reads the invoice numbers from the `Inputinvoice.xlsx` Excel file, which contains a single column of invoice numbers.
+
+3. **Only Process PDFs for Invoices in Excel:**
+   - The `ProcessFile` method now checks if the extracted invoice number is present in the list of invoice numbers from the Excel file.
+
+4. **Create a ZIP File:**
+   - The `CreateZipFile` method creates a ZIP archive named `BBK Invoices - Current Date.zip` containing all the individual output PDF files.
+
+### Requirements:
+
+- **EPPlus NuGet Package**: You need to install the EPPlus library to work with Excel files.
+   ```
+   Install-Package EPPlus
+   ```
+- **iText7 NuGet Package**: Ensure you have the necessary iText7 libraries to work with PDF files.
+   ```
+   Install-Package itext7
+   ```
+
+This approach fulfills all of the requirements while maintaining the original file processing logic.
