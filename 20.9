@@ -1,0 +1,19 @@
+  var files = Directory.GetFiles(inputFolder, "*.pdf");
+  foreach (var file in files)
+  {
+      ProcessFile(file, outputFolder);
+      File.Move(file, Path.Combine(originalFileFolder, Path.GetFileName(file)));
+  }
+
+in this line getting error -
+-		$exception	{"Cannot create a file when that file already exists."}	System.IO.IOException
+
+write code to handle exception
+
+if same name file will there then make _1 then 2nd time _2 after file name in originalFileFolder folder.
+this if for 1st time
+4158168 - 4158187.pdf
+2nd time
+4158168 - 4158187_1.pdf
+3rd time 
+4158168 - 4158187_2.pdf
