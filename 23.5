@@ -1,0 +1,63 @@
+     private int GenerateNewBatchId(SqlConnection connection)
+     {
+         string query = "SELECT ISNULL(MAX(BatchId), 0) + 1 FROM OutputFileDetails";
+         using (var command = new SqlCommand(query, connection))
+         {
+             return (int)command.ExecuteScalar();
+         }
+     }
+
+
+
+
+private DataTable FetchDataFromDatabaseNEWMethod()
+{
+    var dataTable = new DataTable();
+
+    using (var connection = new SqlConnection(ConfigurationManager.ConnectionStrings["DefaultConnection"].ConnectionString))
+    {
+        connection.Open();
+
+        // First query: Fetching data from ExistingOldOutputFileDetails
+        string queryForOldData = @"
+    SELECT Date, Agent, TimesheetOwner, TotalTalkingTime, Division 
+    FROM ExistingOldOutputFileDetails";
+
+        // Second query: Fetching data from OutputFileDetails with the latest BatchId
+        string query = @"
+    SELECT Date, Agent, TimesheetOwner, TotalTalkingTime, Division 
+    FROM OutputFileDetails
+    WHERE BatchId IN (
+        SELECT MAX(BatchId)
+        FROM OutputFileDetails
+        GROUP BY CAST(CreatedDateTime AS DATE)
+    )";
+
+        // Execute first query and fill dataTable
+        using (var command = new SqlCommand(queryForOldData, connection))
+        {
+            using (var adapter = new SqlDataAdapter(command))
+            {
+                adapter.Fill(dataTable);  // Filling with the result of the first query
+            }
+        }
+
+        // Execute second query and merge data into the same dataTable
+        using (var command = new SqlCommand(query, connection))
+        {
+            using (var adapter = new SqlDataAdapter(command))
+            {
+                var tempTable = new DataTable();
+                adapter.Fill(tempTable);  // Filling temporary table with the second query
+
+                // Now merge tempTable into dataTable
+                dataTable.Merge(tempTable);
+            }
+        }
+    }
+
+    return dataTable;
+}
+
+
+I want to use stored procedure in place of table query so write code and stored procedure as well.
