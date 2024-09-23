@@ -1,0 +1,74 @@
+You can modify your method to use stored procedures instead of raw queries. Below is the updated C# code and the corresponding stored procedures.
+
+### C# Code (using stored procedures)
+```csharp
+private DataTable FetchDataFromDatabaseNEWMethod()
+{
+    var dataTable = new DataTable();
+
+    using (var connection = new SqlConnection(ConfigurationManager.ConnectionStrings["DefaultConnection"].ConnectionString))
+    {
+        connection.Open();
+
+        // First stored procedure call: Fetch data from ExistingOldOutputFileDetails
+        using (var command = new SqlCommand("spFetchOldOutputFileDetails", connection))
+        {
+            command.CommandType = CommandType.StoredProcedure;
+
+            using (var adapter = new SqlDataAdapter(command))
+            {
+                adapter.Fill(dataTable);  // Filling with the result of the first procedure
+            }
+        }
+
+        // Second stored procedure call: Fetch data from OutputFileDetails with the latest BatchId
+        using (var command = new SqlCommand("spFetchLatestOutputFileDetails", connection))
+        {
+            command.CommandType = CommandType.StoredProcedure;
+
+            using (var adapter = new SqlDataAdapter(command))
+            {
+                var tempTable = new DataTable();
+                adapter.Fill(tempTable);  // Filling temporary table with the second procedure
+
+                // Now merge tempTable into dataTable
+                dataTable.Merge(tempTable);
+            }
+        }
+    }
+
+    return dataTable;
+}
+```
+
+### SQL Stored Procedures
+
+1. **Fetch Data from `ExistingOldOutputFileDetails`:**
+```sql
+CREATE PROCEDURE spFetchOldOutputFileDetails
+AS
+BEGIN
+    SELECT Date, Agent, TimesheetOwner, TotalTalkingTime, Division 
+    FROM ExistingOldOutputFileDetails;
+END
+```
+
+2. **Fetch Latest Data from `OutputFileDetails`:**
+```sql
+CREATE PROCEDURE spFetchLatestOutputFileDetails
+AS
+BEGIN
+    SELECT Date, Agent, TimesheetOwner, TotalTalkingTime, Division 
+    FROM OutputFileDetails
+    WHERE BatchId IN (
+        SELECT MAX(BatchId)
+        FROM OutputFileDetails
+        GROUP BY CAST(CreatedDateTime AS DATE)
+    );
+END
+```
+
+### Explanation:
+- The `spFetchOldOutputFileDetails` stored procedure fetches data from the `ExistingOldOutputFileDetails` table.
+- The `spFetchLatestOutputFileDetails` stored procedure fetches data from the `OutputFileDetails` table, selecting records with the latest `BatchId` grouped by `CreatedDateTime`.
+- In the C# code, these stored procedures are executed using `SqlCommand` and the data is retrieved using `SqlDataAdapter`. The result from the first stored procedure is merged with the result from the second one in the `DataTable`.
