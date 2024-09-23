@@ -1,0 +1,140 @@
+You can modify your code to use stored procedures for the insert and delete operations. Below is the updated C# code and the SQL stored procedures you can use.
+
+### C# Code (using stored procedures)
+```csharp
+private void InsertIntoDatabase(string csvFilePath)
+{
+    try
+    {
+        if (!File.Exists(csvFilePath))
+        {
+            LogToErrorFile($"File not found: {csvFilePath}");
+            return;
+        }
+
+        using (var connection = new SqlConnection(ConfigurationManager.ConnectionStrings["DefaultConnection"].ConnectionString))
+        {
+            connection.Open();
+
+            int batchId = GenerateNewBatchId(connection);
+
+            using (var insertCommand = new SqlCommand("spInsertIntoOutputFileDetails", connection))
+            {
+                insertCommand.CommandType = CommandType.StoredProcedure;
+
+                using (var reader = new StreamReader(csvFilePath))
+                {
+                    for (int i = 0; i < 6; i++)
+                    {
+                        reader.ReadLine();
+                    }
+
+                    reader.ReadLine();
+                    while (!reader.EndOfStream)
+                    {
+                        var line = reader.ReadLine();
+                        var values = line.Split(',');
+
+                        if (values.Length < 8)
+                        {
+                            LogToErrorFile($"Skipping line due to insufficient values: {line}");
+                            continue;
+                        }
+
+                        var agentExtensionWithOwner = values[0].Trim('"');
+                        var timesheetOwner = values[1].Trim('"');
+                        var len = values.Length;
+                        var totalTalkingTime = values[len - 1].Trim();
+
+                        var parts = agentExtensionWithOwner.Split(' ', 2);
+
+                        if (parts.Length < 2)
+                        {
+                            LogToErrorFile($"Skipping line due to invalid agentExtensionWithOwner format: {line}");
+                            continue;
+                        }
+
+                        var agentExtension = parts[0].Trim();
+                        var divisionValue = parts[1].Trim('"');
+
+                        if (agentExtension == "4000" || agentExtension == "9998")
+                        {
+                            LogToErrorFile($"Skipping line due to excluded agentExtension: {line}");
+                            continue;
+                        }
+
+                        if (!string.IsNullOrEmpty(agentExtension))
+                        {
+                            insertCommand.Parameters.Clear();
+                            insertCommand.Parameters.AddWithValue("@Date", DateTime.Today);
+                            insertCommand.Parameters.AddWithValue("@Agent", agentExtension);
+                            insertCommand.Parameters.AddWithValue("@TimesheetOwner", timesheetOwner);
+                            insertCommand.Parameters.AddWithValue("@TotalTalkingTime", totalTalkingTime);
+                            insertCommand.Parameters.AddWithValue("@Division", divisionValue);
+                            insertCommand.Parameters.AddWithValue("@CreatedDateTime", DateTime.Now);
+                            insertCommand.Parameters.AddWithValue("@BatchId", batchId);
+
+                            insertCommand.ExecuteNonQuery();
+                        }
+                        else
+                        {
+                            LogToErrorFile($"Skipping line due to empty agentExtension or timesheetOwner: {line}");
+                        }
+                    }
+                }
+            }
+
+            using (var deleteCommand = new SqlCommand("spDeleteOldRecords", connection))
+            {
+                deleteCommand.CommandType = CommandType.StoredProcedure;
+                deleteCommand.ExecuteNonQuery();
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        LogToErrorFile($"General Exception: {ex.Message}");
+        StartConsoleWriting(ex.Message);
+    }
+}
+```
+
+### SQL Stored Procedures
+
+1. **Insert Stored Procedure:**
+
+```sql
+CREATE PROCEDURE spInsertIntoOutputFileDetails
+    @Date DATE,
+    @Agent NVARCHAR(50),
+    @TimesheetOwner NVARCHAR(50),
+    @TotalTalkingTime NVARCHAR(50),
+    @Division NVARCHAR(50),
+    @CreatedDateTime DATETIME,
+    @BatchId INT
+AS
+BEGIN
+    INSERT INTO OutputFileDetails (Date, Agent, TimesheetOwner, TotalTalkingTime, Division, CreatedDateTime, BatchId)
+    VALUES (@Date, @Agent, @TimesheetOwner, @TotalTalkingTime, @Division, @CreatedDateTime, @BatchId);
+END
+```
+
+2. **Delete Stored Procedure:**
+
+```sql
+CREATE PROCEDURE spDeleteOldRecords
+AS
+BEGIN
+    DELETE FROM OutputFileDetails
+    WHERE BatchId < (
+        SELECT MAX(BatchId) 
+        FROM OutputFileDetails AS innerTable 
+        WHERE CAST(innerTable.CreatedDateTime AS DATE) = CAST(OutputFileDetails.CreatedDateTime AS DATE)
+    );
+END
+```
+
+### Explanation:
+- The stored procedure `spInsertIntoOutputFileDetails` inserts the provided data into the `OutputFileDetails` table.
+- The stored procedure `spDeleteOldRecords` deletes old records from the `OutputFileDetails` table, keeping only the most recent batch for the current date.
+- In the C# code, the stored procedures are called using `SqlCommand`, with parameters passed for insertion.
